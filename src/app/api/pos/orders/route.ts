@@ -13,10 +13,14 @@ export async function GET(req: NextRequest) {
   const status = searchParams.get("status")
   const date = searchParams.get("date")
 
+  const qr = searchParams.get("qr")
+
   const where: Record<string, unknown> = { organizationId: user.organizationId }
   if (locationId) where.locationId = locationId
   if (shiftId) where.shiftId = shiftId
   if (status) where.status = status
+  // QR orders = OPEN orders without a shift (came from customer-facing menu)
+  if (qr === "true") { where.status = "OPEN"; where.shiftId = null }
   if (date) {
     const d = new Date(date)
     const start = new Date(d.getFullYear(), d.getMonth(), d.getDate())
@@ -27,7 +31,7 @@ export async function GET(req: NextRequest) {
   const orders = await prisma.pOSOrder.findMany({
     where,
     include: {
-      items: true,
+      items: { include: { modifiers: true } },
       payments: true,
       cashier: { select: { id: true, name: true } },
     },

@@ -41,8 +41,8 @@ const OWNER_NAV: NavGroup[] = [
     { label: "Barang Masuk",     href: "/dashboard/goods-receipt", icon: Truck,          feature: "GOODS_RECEIPT" },
   ]},
   { label: "Laporan",     items: [
-    { label: "Peringatan",        href: "/dashboard/alerts", icon: AlertTriangle, feature: "ALERTS" },
-    { label: "Riwayat Aktivitas", href: "/dashboard/audit",  icon: History },
+    { label: "Peringatan",        href: "/dashboard/alerts",     icon: AlertTriangle, feature: "ALERTS" },
+    { label: "Riwayat Aktivitas", href: "/dashboard/audit",      icon: History },
   ]},
   { label: "Tim & Akun",  items: [
     { label: "Manajemen",  href: "/dashboard/team",     icon: Users },
@@ -71,15 +71,24 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const [alertCount, setAlertCount] = useState(0)
   const [orgPerms, setOrgPerms] = useState<OrgPermissions | null>(null)
 
-  useEffect(() => {
-    if (!session) return
+  const refreshAlertCount = () => {
     fetch("/api/alerts?resolved=false")
       .then((r) => r.ok ? r.json() : [])
       .then((d: unknown[]) => setAlertCount(Array.isArray(d) ? d.length : 0))
+  }
+
+  useEffect(() => {
+    if (!session) return
+    refreshAlertCount()
     fetch("/api/permissions")
       .then((r) => r.ok ? r.json() : null)
       .then(setOrgPerms)
   }, [session])
+
+  useEffect(() => {
+    window.addEventListener("alert-resolved", refreshAlertCount)
+    return () => window.removeEventListener("alert-resolved", refreshAlertCount)
+  }, [])
 
   const sessionUser = session?.user as {
     name?: string | null; email?: string | null; role?: string; businessName?: string; orgPlan?: string

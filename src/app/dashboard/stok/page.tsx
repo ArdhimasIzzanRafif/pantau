@@ -1,7 +1,8 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { Search, Warehouse, Store, RefreshCw, TrendingDown, AlertTriangle } from "lucide-react"
+import { Search, Warehouse, Store, RefreshCw, TrendingDown, AlertTriangle, Info } from "lucide-react"
+import Link from "next/link"
 
 type StockBalance = {
   id: string
@@ -162,6 +163,17 @@ export default function StokPage() {
         </div>
       ) : (
         <>
+          {/* How-to callout */}
+          <div className="flex items-start gap-3 bg-blue-50 border border-blue-200 rounded-2xl px-5 py-3.5">
+            <Info className="w-4 h-4 text-blue-500 mt-0.5 shrink-0" />
+            <p className="text-sm text-blue-700">
+              Jumlah stok tidak bisa diedit langsung. Untuk menyesuaikan stok fisik, gunakan{" "}
+              <Link href="/dashboard/opname" className="font-semibold underline hover:text-blue-900">Opname Fisik</Link>.
+              Transfer antar lokasi menggunakan{" "}
+              <Link href="/dashboard/transfer" className="font-semibold underline hover:text-blue-900">Transfer Barang</Link>.
+            </p>
+          </div>
+
           {/* Alert banner */}
           {totalLow > 0 && (
             <div className="flex items-center gap-3 bg-orange-50 border border-orange-200 rounded-2xl px-5 py-3.5">

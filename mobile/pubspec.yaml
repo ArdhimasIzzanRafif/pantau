@@ -1,0 +1,52 @@
+name: pantau_app
+description: Pantau - Operational Command Center for F&B & Retail SMBs
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.10.7
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.8
+
+  # Navigation
+  go_router: ^14.0.0
+
+  # State management
+  flutter_riverpod: ^2.5.1
+
+  # HTTP
+  dio: ^5.4.3
+  cookie_jar: ^4.0.8
+  dio_cookie_manager: ^3.1.1
+
+  # Storage
+  flutter_secure_storage: ^9.2.2
+  sqflite: ^2.3.3
+  path: ^1.9.0
+  shared_preferences: ^2.3.2
+
+  # Network
+  connectivity_plus: ^6.0.3
+
+  # UI utilities
+  intl: ^0.19.0
+  shimmer: ^3.0.0
+  path_provider: ^2.1.6
+
+  # Share
+  share_plus: ^10.0.0
+
+  # Image pick & compress
+  image_picker: ^1.1.2
+  flutter_image_compress: ^2.3.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true

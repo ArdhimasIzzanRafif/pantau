@@ -1,0 +1,747 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ─── TENANT ───────────────────────────────────────────────────────────────────
+
+model Organization {
+  id        String   @id @default(cuid())
+  name      String
+  slug      String   @unique
+  logoUrl      String?
+  qrisImageUrl String?
+  qrisPayload  String?
+  ownerPhone           String?
+  receiptLogoUrl       String?
+  receiptWifiName      String?
+  receiptWifiPassword  String?
+  receiptFooterText    String?
+  midtransServerKey    String?
+  midtransClientKey    String?
+  midtransProduction   Boolean @default(false)
+  rolePermissions Json?
+  orderCounter    Int        @default(0)
+  plan         Plan       @default(FREE)
+  status       OrgStatus  @default(TRIAL)
+  trialEndsAt  DateTime?
+  lastActiveAt DateTime?
+  suspendedAt  DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  users             OrganizationUser[]
+  locations         Location[]
+  inventoryItems    InventoryItem[]
+  inventorySettings InventoryLocationSetting[]
+  stockBalances     StockBalance[]
+  stockMovements    StockMovement[]
+  stockTransfers    StockTransfer[]
+  goodsReceipts     GoodsReceipt[]
+  stockOpnames      StockOpname[]
+  alerts            Alert[]
+  auditLogs         AuditLog[]
+  posShifts         POSShift[]
+  posOrders         POSOrder[]
+  modifierGroups    MenuModifierGroup[]
+  discountRules     DiscountRule[]
+  tables            Table[]
+}
+
+enum Plan {
+  FREE
+  STARTER
+  PRO
+  ENTERPRISE
+}
+
+enum OrgStatus {
+  PENDING
+  TRIAL
+  ACTIVE
+  SUSPENDED
+  CANCELLED
+  EXPIRED
+}
+
+// ─── USER & AUTH ──────────────────────────────────────────────────────────────
+
+model User {
+  id            String    @id @default(cuid())
+  name          String?
+  email         String    @unique
+  emailVerified DateTime?
+  image         String?
+  password      String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  organizations      OrganizationUser[]
+  accounts           Account[]
+  sessions           Session[]
+  posShiftsAsCashier POSShift[] @relation("ShiftCashier")
+  posOrdersAsCashier POSOrder[] @relation("OrderCashier")
+}
+
+model OrganizationUser {
+  id             String   @id @default(cuid())
+  organizationId String
+  userId         String
+  role           Role
+  createdAt      DateTime @default(now())
+
+  organization      Organization              @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user              User                      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  assignedLocations UserLocation[]
+
+  @@unique([organizationId, userId])
+  @@index([organizationId])
+  @@index([userId])
+}
+
+model UserLocation {
+  id        String @id @default(cuid())
+  orgUserId String
+  locationId String
+
+  orgUser  OrganizationUser @relation(fields: [orgUserId], references: [id], onDelete: Cascade)
+  location Location         @relation(fields: [locationId], references: [id], onDelete: Cascade)
+
+  @@unique([orgUserId, locationId])
+  @@index([orgUserId])
+}
+
+enum Role {
+  OWNER
+  ADMIN_GUDANG
+  SUPERVISOR
+  EMPLOYEE
+  KASIR
+}
+
+// ─── AUTH (NextAuth) ──────────────────────────────────────────────────────────
+
+model Account {
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([provider, providerAccountId])
+}
+
+model Session {
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String
+  expires    DateTime
+
+  @@id([identifier, token])
+}
+
+// ─── LOCATION ─────────────────────────────────────────────────────────────────
+
+model Location {
+  id             String       @id @default(cuid())
+  organizationId String
+  name           String
+  type           LocationType
+  address        String?
+  isActive       Boolean      @default(true)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  organization      Organization               @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  stockBalances     StockBalance[]
+  inventorySettings InventoryLocationSetting[]
+  transfersFrom     StockTransfer[]            @relation("TransferFrom")
+  transfersTo       StockTransfer[]            @relation("TransferTo")
+  goodsReceipts     GoodsReceipt[]
+  opnames           StockOpname[]
+  menuToken         String       @unique @default(cuid())
+  posShifts         POSShift[]
+  posOrders         POSOrder[]
+  assignedUsers     UserLocation[]
+  tables            Table[]
+
+  @@index([organizationId])
+}
+
+enum LocationType {
+  WAREHOUSE
+  OUTLET
+}
+
+// ─── INVENTORY ────────────────────────────────────────────────────────────────
+
+model InventoryItem {
+  id             String   @id @default(cuid())
+  organizationId String
+  name           String
+  sku            String?
+  category       String?
+  unit           String   @default("pcs")
+  packSize       Int?
+  packUnit       String?
+  costPrice      Decimal? @db.Decimal(15, 2)
+  sellPrice      Decimal? @db.Decimal(15, 2)
+  minStock       Int?
+  isTrackable      Boolean  @default(true)
+  isMenuItem       Boolean  @default(false)
+  isActive         Boolean  @default(true)
+  isAvailableForQr Boolean  @default(true)
+  description    String?
+  imageUrl       String?
+  notes          String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization     Organization               @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  stockBalances    StockBalance[]
+  stockMovements   StockMovement[]
+  transferItems    StockTransferItem[]
+  receiptItems     GoodsReceiptItem[]
+  opnameItems      StockOpnameItem[]
+  locationSettings InventoryLocationSetting[]
+  recipeItems      RecipeItem[]               @relation("ParentItem")
+  usedInRecipes    RecipeItem[]               @relation("ChildItem")
+  posOrderItems    POSOrderItem[]
+  modifierGroups   InventoryItemModifier[]
+
+  @@unique([organizationId, sku])
+  @@index([organizationId])
+}
+
+model InventoryLocationSetting {
+  id             String   @id @default(cuid())
+  organizationId String
+  itemId         String
+  locationId     String
+  minStock       Int?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  item         InventoryItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  location     Location      @relation(fields: [locationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, itemId, locationId])
+  @@index([organizationId, locationId])
+}
+
+model StockBalance {
+  id             String   @id @default(cuid())
+  organizationId String
+  itemId         String
+  locationId     String
+  quantity       Decimal  @default(0) @db.Decimal(15, 3)
+  updatedAt      DateTime @updatedAt
+
+  organization Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  item         InventoryItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  location     Location      @relation(fields: [locationId], references: [id], onDelete: Cascade)
+
+  @@unique([itemId, locationId])
+  @@index([organizationId, locationId])
+}
+
+// ─── STOCK MOVEMENTS (immutable audit trail) ─────────────────────────────────
+
+model StockMovement {
+  id             String       @id @default(cuid())
+  organizationId String
+  itemId         String
+  locationId     String
+  type           MovementType
+  quantity       Decimal      @db.Decimal(15, 3)
+  note           String?
+  referenceId    String?
+  createdById    String?
+  createdAt      DateTime     @default(now())
+
+  organization Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  item         InventoryItem @relation(fields: [itemId], references: [id])
+
+  @@index([organizationId, itemId, createdAt])
+  @@index([organizationId, locationId, createdAt])
+}
+
+enum MovementType {
+  GOODS_IN
+  GOODS_OUT
+  TRANSFER_OUT
+  TRANSFER_IN
+  OPNAME_CORRECTION
+  WASTE
+  DAMAGE
+  INITIAL_STOCK
+  POS_SALE
+}
+
+// ─── GOODS RECEIPT (barang masuk) ────────────────────────────────────────────
+
+model GoodsReceipt {
+  id             String             @id @default(cuid())
+  organizationId String
+  locationId     String
+  receiptNumber  String?
+  supplier       String?
+  notes          String?
+  status         GoodsReceiptStatus @default(DRAFT)
+  imageUrl       String?
+  receivedAt     DateTime           @default(now())
+  createdById    String?
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+
+  organization Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  location     Location           @relation(fields: [locationId], references: [id])
+  items        GoodsReceiptItem[]
+
+  @@index([organizationId, locationId])
+}
+
+enum GoodsReceiptStatus {
+  DRAFT
+  CONFIRMED
+}
+
+model GoodsReceiptItem {
+  id        String   @id @default(cuid())
+  receiptId String
+  itemId    String
+  quantity  Decimal  @db.Decimal(15, 3)
+  costPrice Decimal? @db.Decimal(15, 2)
+
+  receipt GoodsReceipt  @relation(fields: [receiptId], references: [id], onDelete: Cascade)
+  item    InventoryItem @relation(fields: [itemId], references: [id])
+
+  @@index([receiptId])
+  @@index([itemId])
+}
+
+// ─── STOCK TRANSFER (gudang → outlet) ────────────────────────────────────────
+
+model StockTransfer {
+  id             String         @id @default(cuid())
+  organizationId String
+  fromLocationId String
+  toLocationId   String
+  status         TransferStatus @default(PENDING)
+  notes          String?
+  sentAt         DateTime?
+  receivedAt     DateTime?
+  createdById    String?
+  confirmedById  String?
+  receiptImageUrl String?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  organization Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  fromLocation Location            @relation("TransferFrom", fields: [fromLocationId], references: [id])
+  toLocation   Location            @relation("TransferTo", fields: [toLocationId], references: [id])
+  items        StockTransferItem[]
+
+  @@index([organizationId, status])
+  @@index([toLocationId, status])
+}
+
+enum TransferStatus {
+  PENDING
+  SENT
+  RECEIVED
+  REJECTED
+}
+
+model StockTransferItem {
+  id          String   @id @default(cuid())
+  transferId  String
+  itemId      String
+  quantity    Decimal  @db.Decimal(15, 3)
+  receivedQty Decimal? @db.Decimal(15, 3)
+
+  transfer StockTransfer @relation(fields: [transferId], references: [id], onDelete: Cascade)
+  item     InventoryItem @relation(fields: [itemId], references: [id])
+}
+
+// ─── STOCK OPNAME ─────────────────────────────────────────────────────────────
+
+model StockOpname {
+  id             String       @id @default(cuid())
+  organizationId String
+  locationId     String
+  periodStart    DateTime
+  periodEnd      DateTime
+  shift          String?
+  status         OpnameStatus @default(DRAFT)
+  notes          String?
+  submittedAt    DateTime?
+  createdById    String?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  organization Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  location     Location          @relation(fields: [locationId], references: [id])
+  items        StockOpnameItem[]
+
+  @@index([organizationId, locationId])
+}
+
+enum OpnameStatus {
+  DRAFT
+  SUBMITTED
+  REVIEWED
+}
+
+model StockOpnameItem {
+  id            String   @id @default(cuid())
+  opnameId      String
+  itemId        String
+  systemQty     Decimal  @db.Decimal(15, 3)
+  physicalQty   Decimal? @db.Decimal(15, 3)
+  difference    Decimal? @db.Decimal(15, 3)
+  estimatedLoss Decimal? @db.Decimal(15, 2)
+  notes         String?
+
+  opname StockOpname   @relation(fields: [opnameId], references: [id], onDelete: Cascade)
+  item   InventoryItem @relation(fields: [itemId], references: [id])
+
+  @@index([opnameId])
+}
+
+// ─── POS UPLOAD & MAPPING ────────────────────────────────────────────────────
+
+// ─── RECIPE / BOM ─────────────────────────────────────────────────────────────
+
+model RecipeItem {
+  id           String  @id @default(cuid())
+  parentItemId String
+  childItemId  String
+  quantity     Decimal @db.Decimal(15, 3)
+
+  parentItem InventoryItem @relation("ParentItem", fields: [parentItemId], references: [id], onDelete: Cascade)
+  childItem  InventoryItem @relation("ChildItem", fields: [childItemId], references: [id])
+
+  @@unique([parentItemId, childItemId])
+}
+
+// ─── MODIFIER MENU ────────────────────────────────────────────────────────────
+
+model MenuModifierGroup {
+  id             String   @id @default(cuid())
+  organizationId String
+  name           String
+  isRequired     Boolean  @default(false)
+  maxSelect      Int      @default(1)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization              @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  options      MenuModifierOption[]
+  items        InventoryItemModifier[]
+
+  @@index([organizationId])
+}
+
+model MenuModifierOption {
+  id        String  @id @default(cuid())
+  groupId   String
+  name      String
+  price     Decimal @default(0) @db.Decimal(15, 2)
+  sortOrder Int     @default(0)
+
+  group MenuModifierGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+}
+
+model InventoryItemModifier {
+  itemId    String
+  groupId   String
+  sortOrder Int    @default(0)
+
+  item  InventoryItem     @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  group MenuModifierGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  @@id([itemId, groupId])
+}
+
+// ─── DISCOUNT RULES ───────────────────────────────────────────────────────────
+
+model DiscountRule {
+  id             String    @id @default(cuid())
+  organizationId String
+  name           String
+  type           String    // PERCENT | AMOUNT
+  value          Decimal   @db.Decimal(15, 2)
+  minPurchase    Decimal   @default(0) @db.Decimal(15, 2)
+  isActive       Boolean   @default(true)
+  sortOrder      Int       @default(0)
+  validDays      String?   // comma-separated 0-6 (0=Min,1=Sen,...,6=Sab), null = setiap hari
+  expiresAt      DateTime? // null = tanpa batas
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, isActive])
+}
+
+model Table {
+  id             String   @id @default(cuid())
+  organizationId String
+  locationId     String
+  name           String
+  tableToken     String   @unique @default(cuid())
+  isActive       Boolean  @default(true)
+  sortOrder      Int      @default(0)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  location     Location     @relation(fields: [locationId], references: [id])
+
+  @@index([organizationId, locationId])
+  @@index([tableToken])
+}
+
+// ─── POS SYSTEM ───────────────────────────────────────────────────────────────
+
+enum ShiftStatus {
+  OPEN
+  CLOSED
+}
+
+enum OrderType {
+  DINE_IN
+  TAKEAWAY
+  DELIVERY
+}
+
+enum OrderStatus {
+  PENDING_PAYMENT
+  OPEN
+  HELD
+  PAID
+  VOID
+}
+
+enum PaymentMethod {
+  CASH
+  QRIS
+  TRANSFER
+  CARD
+  GOFOOD
+  GRABFOOD
+  SHOPEEFOOD
+  OTHER
+}
+
+model POSShift {
+  id             String      @id @default(cuid())
+  organizationId String
+  locationId     String
+  cashierId      String
+  shiftNumber    String
+  openingBalance Decimal     @default(0) @db.Decimal(15, 2)
+  closingBalance Decimal?    @db.Decimal(15, 2)
+  expectedCash   Decimal?    @db.Decimal(15, 2)
+  totalSales     Decimal     @default(0) @db.Decimal(15, 2)
+  totalOrders    Int         @default(0)
+  notes          String?
+  openedAt       DateTime    @default(now())
+  closedAt       DateTime?
+  status         ShiftStatus @default(OPEN)
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  location     Location     @relation(fields: [locationId], references: [id])
+  cashier      User         @relation("ShiftCashier", fields: [cashierId], references: [id])
+  orders       POSOrder[]
+
+  @@index([organizationId, locationId, status])
+}
+
+model POSOrder {
+  id             String      @id @default(cuid())
+  organizationId String
+  locationId     String
+  shiftId        String?
+  cashierId      String?
+  orderNumber    String
+  orderType      OrderType   @default(DINE_IN)
+  tableNumber    String?
+  customerName   String?
+  status         OrderStatus @default(OPEN)
+  subtotal       Decimal     @db.Decimal(15, 2)
+  discountType   String?
+  discountValue  Decimal     @default(0) @db.Decimal(15, 2)
+  discountAmount Decimal     @default(0) @db.Decimal(15, 2)
+  discountLabel         String?
+  platformOrderNumber   String?
+  taxPercent     Decimal     @default(0) @db.Decimal(5, 2)
+  taxAmount      Decimal     @default(0) @db.Decimal(15, 2)
+  total          Decimal     @db.Decimal(15, 2)
+  guestSessionId String?
+  notes          String?
+  voidReason     String?
+  snapToken      String?
+  paymentRef     String?
+  paidAt         DateTime?
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+
+  organization Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  location     Location       @relation(fields: [locationId], references: [id])
+  shift        POSShift?      @relation(fields: [shiftId], references: [id])
+  cashier      User?          @relation("OrderCashier", fields: [cashierId], references: [id])
+  items        POSOrderItem[]
+  payments     POSPayment[]
+
+  @@index([organizationId, locationId, createdAt])
+  @@index([organizationId, status])
+  @@index([shiftId])
+  @@index([cashierId])
+  @@index([guestSessionId])
+}
+
+model POSOrderItem {
+  id         String  @id @default(cuid())
+  orderId    String
+  menuItemId String?
+  name       String
+  price      Decimal @db.Decimal(15, 2)
+  qty        Int
+  discount   Decimal @default(0) @db.Decimal(15, 2)
+  subtotal   Decimal @db.Decimal(15, 2)
+  notes      String?
+
+  order    POSOrder       @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  menuItem InventoryItem? @relation(fields: [menuItemId], references: [id], onDelete: SetNull)
+  modifiers POSOrderItemModifier[]
+
+  @@index([orderId])
+}
+
+model POSOrderItemModifier {
+  id          String  @id @default(cuid())
+  orderItemId String
+  groupName   String
+  optionName  String
+  price       Decimal @default(0) @db.Decimal(15, 2)
+
+  orderItem POSOrderItem @relation(fields: [orderItemId], references: [id], onDelete: Cascade)
+
+  @@index([orderItemId])
+}
+
+model POSPayment {
+  id        String        @id @default(cuid())
+  orderId   String
+  method    PaymentMethod
+  amount    Decimal       @db.Decimal(15, 2)
+  change    Decimal       @default(0) @db.Decimal(15, 2)
+  reference String?
+  note      String?
+  createdAt DateTime      @default(now())
+
+  order POSOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([orderId])
+}
+
+// ─── ALERTS ──────────────────────────────────────────────────────────────────
+
+model Alert {
+  id             String    @id @default(cuid())
+  organizationId String
+  type           AlertType
+  severity       Severity  @default(WARNING)
+  title          String
+  message        String
+  locationId     String?
+  itemId         String?
+  referenceId    String?
+  isResolved     Boolean   @default(false)
+  resolvedAt     DateTime?
+  resolvedById   String?
+  createdAt      DateTime  @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, isResolved])
+}
+
+enum AlertType {
+  STOCK_SHORTAGE
+  STOCK_SURPLUS
+  TRANSFER_REJECTED
+  TRANSFER_COMPLETED
+  ITEM_NO_COST_PRICE
+  POS_ITEM_UNMAPPED
+  LOW_STOCK
+  PRICE_ANOMALY
+}
+
+enum Severity {
+  INFO
+  WARNING
+  CRITICAL
+}
+
+// ─── PLATFORM AUDIT LOG (admin aplikasi) ─────────────────────────────────────
+
+model PlatformAuditLog {
+  id         String   @id @default(cuid())
+  adminEmail String
+  action     String
+  targetType String
+  targetId   String?
+  note       String?
+  before     Json?
+  after      Json?
+  createdAt  DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([targetType, targetId])
+}
+
+// ─── AUDIT LOG ────────────────────────────────────────────────────────────────
+
+model AuditLog {
+  id             String   @id @default(cuid())
+  organizationId String
+  userId         String?
+  action         String
+  entity         String
+  entityId       String?
+  before         Json?
+  after          Json?
+  ipAddress      String?
+  createdAt      DateTime @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, createdAt])
+  @@index([entity, entityId])
+}

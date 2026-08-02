@@ -23,6 +23,7 @@ export async function GET(_req: NextRequest) {
 export async function POST(req: NextRequest) {
   const user = await requireAuth()
   if (isResponse(user)) return user
+  if (user.role !== "OWNER") return err("Tidak diizinkan", 403)
 
   const body = await req.json()
   const { name, sku, category, notes, sellPrice, description, imageUrl } = body

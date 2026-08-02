@@ -13,15 +13,18 @@ export async function POST(
 
   const { id } = await params
   const body = await req.json()
-  const { payment } = body
+  const { payment, shiftId: bodyShiftId } = body
 
   if (!payment?.method) return err("Metode pembayaran diperlukan")
 
   const held = await prisma.pOSOrder.findFirst({
-    where: { id, organizationId: user.organizationId, status: "HELD" },
+    where: { id, organizationId: user.organizationId, status: { in: ["HELD", "OPEN"] } },
     include: { items: true },
   })
-  if (!held) return err("Order ditahan tidak ditemukan", 404)
+  if (!held) return err("Order tidak ditemukan", 404)
+
+  // QR orders (OPEN, no shiftId) need a shift assigned at payment time
+  const resolvedShiftId = held.shiftId ?? bodyShiftId ?? null
 
   const today = new Date()
   const dateStr =
@@ -46,6 +49,8 @@ export async function POST(
         status: "PAID",
         orderNumber,
         paidAt: new Date(),
+        cashierId: user.id,
+        ...(resolvedShiftId && !held.shiftId ? { shiftId: resolvedShiftId } : {}),
       },
     })
 
@@ -93,9 +98,9 @@ export async function POST(
       }
     }
 
-    if (held.shiftId) {
+    if (resolvedShiftId) {
       await tx.pOSShift.update({
-        where: { id: held.shiftId },
+        where: { id: resolvedShiftId },
         data: {
           totalSales: { increment: total },
           totalOrders: { increment: 1 },

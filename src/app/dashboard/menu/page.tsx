@@ -625,8 +625,8 @@ export default function MenuPage() {
       <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
         <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
           <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl bg-green-50 flex items-center justify-center">
-              <Tag className="w-4 h-4 text-green-600" />
+            <div className="w-9 h-9 rounded-xl bg-blue-50 flex items-center justify-center">
+              <Tag className="w-4 h-4 text-blue-600" />
             </div>
             <div>
               <h2 className="text-sm font-bold text-slate-900">Aturan Diskon</h2>
@@ -635,7 +635,7 @@ export default function MenuPage() {
           </div>
           <button
             onClick={() => { setShowDiscountForm(true); setEditingRule(null); setDiscForm({ name: "", type: "PERCENT", value: "", minPurchase: "", scheduleType: "ALWAYS", validDays: [], expiresAt: "" }) }}
-            className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-xl text-sm font-semibold hover:bg-green-700 transition-colors"
+            className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-xl text-sm font-semibold hover:bg-blue-700 transition-colors"
           >
             <Plus className="w-4 h-4" /> Tambah
           </button>
@@ -646,8 +646,8 @@ export default function MenuPage() {
             {/* Form header */}
             <div className="flex items-center justify-between px-5 py-3.5 bg-slate-50 border-b border-slate-100">
               <div className="flex items-center gap-2.5">
-                <div className="w-7 h-7 bg-green-100 rounded-lg flex items-center justify-center">
-                  <Tag className="w-3.5 h-3.5 text-green-600" />
+                <div className="w-7 h-7 bg-blue-100 rounded-lg flex items-center justify-center">
+                  <Tag className="w-3.5 h-3.5 text-blue-600" />
                 </div>
                 <span className="text-sm font-bold text-slate-800">{editingRule ? "Edit Aturan" : "Aturan Baru"}</span>
               </div>
@@ -666,23 +666,23 @@ export default function MenuPage() {
               {/* Nama */}
               <input required placeholder="Nama diskon — cth: Happy Hour, Member, Promo Hari Ini"
                 value={discForm.name} onChange={(e) => setDiscForm({ ...discForm, name: e.target.value })}
-                className="w-full px-4 py-2.5 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-green-500" />
+                className="w-full px-4 py-2.5 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500" />
 
               {/* Tipe · Nilai · Min beli — satu baris */}
               <div className="flex items-center gap-2">
                 {/* Type toggle */}
                 <div className="flex p-0.5 bg-slate-100 rounded-xl shrink-0">
                   <button type="button" onClick={() => setDiscForm({ ...discForm, type: "PERCENT", value: "" })}
-                    className={`px-3.5 py-2 rounded-[10px] text-sm font-bold transition-all ${discForm.type === "PERCENT" ? "bg-white text-green-700 shadow-sm" : "text-slate-400 hover:text-slate-600"}`}>%</button>
+                    className={`px-3.5 py-2 rounded-[10px] text-sm font-bold transition-all ${discForm.type === "PERCENT" ? "bg-white text-blue-700 shadow-sm" : "text-slate-400 hover:text-slate-600"}`}>%</button>
                   <button type="button" onClick={() => setDiscForm({ ...discForm, type: "AMOUNT", value: "" })}
-                    className={`px-3 py-2 rounded-[10px] text-xs font-bold transition-all ${discForm.type === "AMOUNT" ? "bg-white text-green-700 shadow-sm" : "text-slate-400 hover:text-slate-600"}`}>Rp</button>
+                    className={`px-3 py-2 rounded-[10px] text-xs font-bold transition-all ${discForm.type === "AMOUNT" ? "bg-white text-blue-700 shadow-sm" : "text-slate-400 hover:text-slate-600"}`}>Rp</button>
                 </div>
                 {/* Nilai */}
                 {discForm.type === "PERCENT" ? (
                   <div className="relative w-32 shrink-0">
                     <input required type="number" min="0" max="100" placeholder="10"
                       value={discForm.value} onChange={(e) => setDiscForm({ ...discForm, value: e.target.value })}
-                      className="w-full pl-3 pr-7 py-2.5 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-green-500" />
+                      className="w-full pl-3 pr-7 py-2.5 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500" />
                     <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs font-semibold text-slate-400">%</span>
                   </div>
                 ) : (
@@ -690,7 +690,7 @@ export default function MenuPage() {
                     <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs font-medium text-slate-400 pointer-events-none">Rp</span>
                     <input required type="text" inputMode="numeric" placeholder="5.000"
                       value={discForm.value} onChange={(e) => setDiscForm({ ...discForm, value: formatRpInput(e.target.value) })}
-                      className="w-full pl-8 pr-3 py-2.5 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-green-500" />
+                      className="w-full pl-8 pr-3 py-2.5 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500" />
                   </div>
                 )}
                 <div className="h-px w-3 bg-slate-300 shrink-0" />
@@ -699,7 +699,7 @@ export default function MenuPage() {
                   <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs font-medium text-slate-400 pointer-events-none">Rp</span>
                   <input type="text" inputMode="numeric" placeholder="Min. pembelian (opsional)"
                     value={discForm.minPurchase} onChange={(e) => setDiscForm({ ...discForm, minPurchase: formatRpInput(e.target.value) })}
-                    className="w-full pl-8 pr-3 py-2.5 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-green-500" />
+                    className="w-full pl-8 pr-3 py-2.5 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500" />
                 </div>
               </div>
 
@@ -716,11 +716,11 @@ export default function MenuPage() {
                     return (
                       <button key={t} type="button"
                         onClick={() => setDiscForm({ ...discForm, scheduleType: t, validDays: [], expiresAt: "" })}
-                        className={`flex flex-col items-center gap-2 px-3 py-4 rounded-2xl border-2 transition-all text-center ${active ? "border-green-500 bg-green-50" : "border-slate-200 bg-white hover:border-slate-300"}`}>
-                        <Icon className={`w-5 h-5 ${active ? "text-green-600" : "text-slate-400"}`} />
+                        className={`flex flex-col items-center gap-2 px-3 py-4 rounded-2xl border-2 transition-all text-center ${active ? "border-blue-500 bg-blue-50" : "border-slate-200 bg-white hover:border-slate-300"}`}>
+                        <Icon className={`w-5 h-5 ${active ? "text-blue-600" : "text-slate-400"}`} />
                         <div>
-                          <p className={`text-xs font-bold leading-none mb-1 ${active ? "text-green-700" : "text-slate-700"}`}>{label}</p>
-                          <p className={`text-[10px] leading-none ${active ? "text-green-500" : "text-slate-400"}`}>{sub}</p>
+                          <p className={`text-xs font-bold leading-none mb-1 ${active ? "text-blue-700" : "text-slate-700"}`}>{label}</p>
+                          <p className={`text-[10px] leading-none ${active ? "text-blue-500" : "text-slate-400"}`}>{sub}</p>
                         </div>
                       </button>
                     )
@@ -733,7 +733,7 @@ export default function MenuPage() {
                     {["Min","Sen","Sel","Rab","Kam","Jum","Sab"].map((label, i) => (
                       <button key={i} type="button"
                         onClick={() => setDiscForm({ ...discForm, validDays: discForm.validDays.includes(i) ? discForm.validDays.filter((d) => d !== i) : [...discForm.validDays, i] })}
-                        className={`flex-1 py-2.5 rounded-xl text-xs font-bold transition-all ${discForm.validDays.includes(i) ? "bg-green-600 text-white shadow-sm" : "bg-slate-100 text-slate-500 hover:bg-slate-200"}`}>
+                        className={`flex-1 py-2.5 rounded-xl text-xs font-bold transition-all ${discForm.validDays.includes(i) ? "bg-blue-600 text-white shadow-sm" : "bg-slate-100 text-slate-500 hover:bg-slate-200"}`}>
                         {label}
                       </button>
                     ))}
@@ -745,14 +745,14 @@ export default function MenuPage() {
                   <input type="date" required value={discForm.expiresAt}
                     min={new Date().toISOString().slice(0, 10)}
                     onChange={(e) => setDiscForm({ ...discForm, expiresAt: e.target.value })}
-                    className="w-full px-3 py-2.5 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-green-500" />
+                    className="w-full px-3 py-2.5 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500" />
                 )}
               </div>
 
               {/* Submit */}
               <button type="submit"
                 disabled={discSaving || (discForm.scheduleType === "DAYS" && discForm.validDays.length === 0)}
-                className="w-full py-2.5 bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white font-bold text-sm rounded-xl transition-colors">
+                className="w-full py-2.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-bold text-sm rounded-xl transition-colors">
                 {discSaving ? "Menyimpan..." : editingRule ? "Simpan Perubahan" : "Buat Aturan"}
               </button>
             </div>
@@ -776,11 +776,13 @@ export default function MenuPage() {
               return (
                 <div key={rule.id} className={`flex items-center gap-4 px-5 py-4 hover:bg-slate-50 transition-colors ${!rule.isActive ? "opacity-60" : ""}`}>
                   <button onClick={() => handleDiscountToggle(rule)}
-                    className={`w-9 h-5 rounded-full transition-colors relative shrink-0 ${rule.isActive ? "bg-green-500" : "bg-slate-200"}`}>
-                    <span className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${rule.isActive ? "translate-x-4" : "translate-x-0.5"}`} />
+                    className={`shrink-0 relative rounded-full transition-colors duration-200 ${rule.isActive ? "bg-blue-600" : "bg-slate-200"}`}
+                    style={{ width: 52, height: 30, padding: 3 }}>
+                    <span className="block bg-white rounded-full transition-transform duration-200"
+                      style={{ width: 24, height: 24, boxShadow: "0 2px 6px rgba(0,0,0,0.18), 0 0.5px 2px rgba(0,0,0,0.12)", transform: rule.isActive ? "translateX(22px)" : "translateX(0)" }} />
                   </button>
-                  <div className={`w-16 h-11 rounded-xl flex items-center justify-center shrink-0 ${rule.isActive ? "bg-green-50 border border-green-100" : "bg-slate-50 border border-slate-200"}`}>
-                    <span className={`text-sm font-black leading-none ${rule.isActive ? "text-green-700" : "text-slate-400"}`}>{discLabel}</span>
+                  <div className={`w-16 h-11 rounded-xl flex items-center justify-center shrink-0 ${rule.isActive ? "bg-blue-50 border border-blue-100" : "bg-slate-50 border border-slate-200"}`}>
+                    <span className={`text-sm font-black leading-none ${rule.isActive ? "text-blue-700" : "text-slate-400"}`}>{discLabel}</span>
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="text-sm font-semibold text-slate-900">{rule.name}</div>

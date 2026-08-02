@@ -19,6 +19,8 @@ import {
   LogOut,
   Pause,
   Play,
+  Bell,
+  UtensilsCrossed,
 } from "lucide-react"
 import Link from "next/link"
 import { signOut } from "next-auth/react"
@@ -121,13 +123,25 @@ type HeldOrder = {
   orderNumber: string
   tableNumber: string | null
   customerName: string | null
-  items: { id: string; name: string; price: number; qty: number; discount: number; subtotal: number; notes: string | null; menuItemId: string | null }[]
+  guestSessionId: string | null
+  items: { id: string; name: string; price: number; qty: number; discount: number; subtotal: number; notes: string | null; menuItemId: string | null; modifiers: { groupName: string; optionName: string; price: number }[] }[]
   total: number
   discountType: string | null
   discountValue: number
   discountAmount: number
   discountLabel: string | null
   createdAt: string
+}
+
+type QrOrder = {
+  id: string
+  orderNumber: string
+  tableNumber: string | null
+  customerName: string | null
+  guestSessionId: string | null
+  total: number
+  createdAt: string
+  items: { id: string; name: string; price: number; qty: number; notes: string | null; menuItemId: string | null; modifiers: { groupName: string; optionName: string; price: number }[] }[]
 }
 
 type OrderItemModifier = { id: string; groupName: string; optionName: string; price: number }
@@ -205,7 +219,7 @@ export default function POSPage() {
   const [orderType, setOrderType] = useState<"DINE_IN" | "TAKEAWAY" | "DELIVERY">("DINE_IN")
   const [tableNumber, setTableNumber] = useState("")
   const [customerName, setCustomerName] = useState("")
-  const [discount, setDiscount] = useState({ type: "PERCENT" as "PERCENT" | "AMOUNT", value: 0, label: "" })
+  const [discount, setDiscount] = useState({ type: "PERCENT" as "PERCENT" | "AMOUNT", value: 0, label: "", ruleId: null as string | null })
   const [taxPercent] = useState(0)
   const [cartNoteId, setCartNoteId] = useState<string | null>(null)
   const [cartDiscountId, setCartDiscountId] = useState<string | null>(null)
@@ -216,12 +230,14 @@ export default function POSPage() {
   const noRecipeTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const [showPaymentModal, setShowPaymentModal] = useState(false)
-  const [paymentMethod, setPaymentMethod] = useState<"CASH" | "QRIS" | "GOFOOD" | "GRABFOOD" | "SHOPEEFOOD">("CASH")
+  const [paymentMethod, setPaymentMethod] = useState<"CASH" | "QRIS" | "TRANSFER" | "GOFOOD" | "GRABFOOD" | "SHOPEEFOOD" | "OTHER">("CASH")
   const [cashAmount, setCashAmount] = useState("")
   const [paymentRef, setPaymentRef] = useState("")
   const [platformOrderNumber, setPlatformOrderNumber] = useState("")
   const [paying, setPaying] = useState(false)
   const [payError, setPayError] = useState<string | null>(null)
+  const [tableErr, setTableErr] = useState(false)
+  const [nameErr, setNameErr] = useState(false)
   const [receiptLogoUrl, setReceiptLogoUrl] = useState<string | null>(null)
   const [receiptWifiName, setReceiptWifiName] = useState<string | null>(null)
   const [receiptWifiPassword, setReceiptWifiPassword] = useState<string | null>(null)
@@ -240,8 +256,31 @@ export default function POSPage() {
 
   const [heldOrders, setHeldOrders] = useState<HeldOrder[]>([])
   const [heldOrderId, setHeldOrderId] = useState<string | null>(null)
+  const [batchHeldIds, setBatchHeldIds] = useState<string[]>([])
   const [showHeldModal, setShowHeldModal] = useState(false)
   const [holdingOrder, setHoldingOrder] = useState(false)
+
+  const [qrOrders, setQrOrders] = useState<QrOrder[]>([])
+  const [showQrPanel, setShowQrPanel] = useState(false)
+  const [tolakConfirm, setTolakConfirm] = useState<QrOrder[] | null>(null)
+  const [tolaking, setTolaking] = useState(false)
+  const prevQrCount = useRef(0)
+
+  function playOrderNotif() {
+    try {
+      const utter = new SpeechSynthesisUtterance("Pesanan masuk")
+      utter.lang = "id-ID"
+      utter.rate = 1.0
+      utter.pitch = 1.0
+      utter.volume = 1.0
+      window.speechSynthesis.speak(utter)
+    } catch { /* browser blocked autoplay */ }
+  }
+
+  useEffect(() => {
+    if (qrOrders.length > prevQrCount.current) playOrderNotif()
+    prevQrCount.current = qrOrders.length
+  }, [qrOrders.length])
 
   const [modifierModal, setModifierModal] = useState<Product | null>(null)
   const [selectedModifiers, setSelectedModifiers] = useState<Record<string, SelectedModifier[]>>({})
@@ -405,6 +444,35 @@ export default function POSPage() {
   }
 
   function updateQty(cartKey: string, delta: number) {
+    if (delta > 0) {
+      const productId = cartKey.split("::")[0]
+      const product = products.find((p) => p.id === productId)
+      if (product && product.stockQty !== null) {
+        const currentQty = cartRef.current.find((c) => c.cartKey === cartKey)?.qty ?? 0
+        const newQty = currentQty + 1
+        if (newQty > product.stockQty) {
+          const issues: StockIssue[] = product.recipeItems.length > 0
+            ? product.recipeItems
+                .map((ri) => ({
+                  name: ri.childItem.name,
+                  unit: ri.childItem.unit,
+                  sisa: ri.currentStock ?? Math.floor((product.stockQty ?? 0) * Number(ri.quantity)),
+                  butuh: Number(ri.quantity) * newQty,
+                }))
+                .filter((issue) => issue.sisa < issue.butuh)
+            : [{ name: product.name, unit: null, sisa: product.stockQty ?? 0, butuh: newQty }]
+          if (issues.length > 0) {
+            setStockModal({
+              productName: product.name,
+              cartKey,
+              issues,
+              pendingAdd: () => setCart((prev) => prev.map((c) => c.cartKey === cartKey ? { ...c, qty: c.qty + 1 } : c)),
+            })
+            return
+          }
+        }
+      }
+    }
     setCart((prev) =>
       prev
         .map((c) => c.cartKey === cartKey ? { ...c, qty: c.qty + delta } : c)
@@ -493,6 +561,15 @@ export default function POSPage() {
   const cashAmountNum = Number(cashAmount.replace(/\D/g, "")) || 0
   const change = cashAmountNum - total
 
+  // Auto-remove rule-based discount when cart total drops below minimum
+  useEffect(() => {
+    if (!discount.ruleId || discount.value === 0) return
+    const rule = discountRules.find((r) => r.id === discount.ruleId)
+    if (rule && subtotal < Number(rule.minPurchase)) {
+      setDiscount({ type: "PERCENT", value: 0, label: "", ruleId: null })
+    }
+  }, [subtotal, discount.ruleId, discount.value, discountRules])
+
   // Generate dynamic QRIS with embedded amount per transaction
   useEffect(() => {
     if (!showPaymentModal || paymentMethod !== "QRIS" || !qrisPayload || total <= 0) {
@@ -523,6 +600,65 @@ export default function POSPage() {
   useEffect(() => {
     fetchHeldOrders()
   }, [fetchHeldOrders])
+
+  const fetchQrOrders = useCallback(async () => {
+    if (!selectedLocation) return
+    try {
+      const res = await fetch(`/api/pos/orders?qr=true&locationId=${selectedLocation.id}`)
+      if (res.ok) setQrOrders(await res.json())
+    } catch { /* ignore */ }
+  }, [selectedLocation])
+
+  useEffect(() => {
+    if (!shift) return
+    fetchQrOrders()
+    const interval = setInterval(fetchQrOrders, 15_000)
+    return () => clearInterval(interval)
+  }, [fetchQrOrders, shift])
+
+  async function ambilQrOrder(order: QrOrder) {
+    await fetch(`/api/pos/orders/${order.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ shiftId: shift?.id ?? null }),
+    })
+    fetchQrOrders()
+    fetchHeldOrders()
+    setShowQrPanel(false)
+    setHoldToast(`Pesanan Meja ${order.tableNumber ?? ""} sudah diambil — lihat Pesanan Ditahan`)
+    setTimeout(() => setHoldToast(null), 3500)
+  }
+
+  async function ambilQrTable(orders: QrOrder[]) {
+    await Promise.all(orders.map(o =>
+      fetch(`/api/pos/orders/${o.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ shiftId: shift?.id ?? null }),
+      })
+    ))
+    fetchQrOrders()
+    fetchHeldOrders()
+    setShowQrPanel(false)
+    const tbl = orders[0]?.tableNumber
+    setHoldToast(`${orders.length} pesanan Meja ${tbl ?? ""} sudah diambil — lihat Pesanan Ditahan`)
+    setTimeout(() => setHoldToast(null), 3500)
+  }
+
+  async function confirmTolak() {
+    if (!tolakConfirm) return
+    setTolaking(true)
+    await Promise.all(tolakConfirm.map(o =>
+      fetch(`/api/pos/orders/${o.id}/void`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reason: "Ditolak kasir" }),
+      })
+    ))
+    setTolakConfirm(null)
+    setTolaking(false)
+    fetchQrOrders()
+  }
 
   const [holdToast, setHoldToast] = useState<string | null>(null)
 
@@ -578,17 +714,49 @@ export default function POSPage() {
       setPayError("Pilih outlet terlebih dahulu")
       return
     }
+    if (orderType === "DINE_IN" && !batchHeldIds.length && !heldOrderId) {
+      const tErr = !tableNumber.trim()
+      const nErr = !customerName.trim()
+      if (tErr) setTableErr(true)
+      if (nErr) setNameErr(true)
+      if (tErr || nErr) return
+    }
     if (paymentMethod === "CASH" && cashAmountNum < total) return
 
     setPayError(null)
     setPaying(true)
     try {
       const isDeliveryPlatform = ["GOFOOD", "GRABFOOD", "SHOPEEFOOD"].includes(paymentMethod)
+
+      // Tab meja: banyak order ditahan dalam 1 tagihan
+      if (batchHeldIds.length > 0) {
+        const res = await fetch("/api/pos/orders/pay-batch", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            orderIds: batchHeldIds,
+            payment: { method: paymentMethod, amount: paymentMethod === "CASH" ? cashAmountNum : total, reference: isDeliveryPlatform || paymentMethod === "OTHER" ? platformOrderNumber || null : paymentRef || null },
+            shiftId: shift?.id ?? null,
+          }),
+        })
+        if (res.ok) {
+          setShowPaymentModal(false)
+          resetOrder()
+          fetchHeldOrders()
+          if (selectedLocation) { fetchShift(selectedLocation.id); fetchProducts(selectedLocation.id) }
+        } else {
+          const d = await res.json().catch(() => ({}))
+          setPayError(d.error ?? "Pembayaran gagal")
+        }
+        setPaying(false)
+        return
+      }
+
       const url = heldOrderId
         ? `/api/pos/orders/${heldOrderId}/pay`
         : "/api/pos/orders"
       const body = heldOrderId
-        ? { payment: { method: paymentMethod, amount: total, reference: platformOrderNumber || paymentRef || null } }
+        ? { payment: { method: paymentMethod, amount: total, reference: platformOrderNumber || paymentRef || null }, shiftId: shift?.id ?? null }
         : {
             locationId: selectedLocation.id,
             shiftId: shift?.id ?? null,
@@ -609,7 +777,7 @@ export default function POSPage() {
             discountLabel: discount.label || null,
             platformOrderNumber: isDeliveryPlatform ? platformOrderNumber || null : null,
             taxPercent, notes: null,
-            payment: { method: paymentMethod, amount: isDeliveryPlatform || paymentMethod === "QRIS" ? total : cashAmountNum, reference: isDeliveryPlatform ? platformOrderNumber || null : paymentRef || null },
+            payment: { method: paymentMethod, amount: paymentMethod === "CASH" ? cashAmountNum : total, reference: isDeliveryPlatform || paymentMethod === "OTHER" ? platformOrderNumber || null : paymentRef || null },
           }
       const res = await fetch(url, {
         method: "POST",
@@ -624,6 +792,7 @@ export default function POSPage() {
         setShowReceipt(true)
         setHeldOrderId(null)
         fetchHeldOrders()
+        fetchQrOrders()
         if (selectedLocation) {
           fetchShift(selectedLocation.id)
           fetchProducts(selectedLocation.id)
@@ -647,7 +816,9 @@ export default function POSPage() {
     setCart([])
     setTableNumber("")
     setCustomerName("")
-    setDiscount({ type: "PERCENT", value: 0, label: "" })
+    setTableErr(false)
+    setNameErr(false)
+    setDiscount({ type: "PERCENT", value: 0, label: "", ruleId: null })
     setPaymentMethod("CASH")
     setCashAmount("")
     setPaymentRef("")
@@ -655,6 +826,7 @@ export default function POSPage() {
     setShowReceipt(false)
     setLastOrder(null)
     setHeldOrderId(null)
+    setBatchHeldIds([])
   }
 
   async function handleOpenShift() {
@@ -679,7 +851,14 @@ export default function POSPage() {
 
   const openPaymentModal = () => {
     if (cart.length === 0) return
-    setCashAmount(String(total))
+    if (orderType === "DINE_IN" && !batchHeldIds.length && !heldOrderId) {
+      const tErr = !tableNumber.trim()
+      const nErr = !customerName.trim()
+      if (tErr) setTableErr(true)
+      if (nErr) setNameErr(true)
+      if (tErr || nErr) return
+    }
+    setCashAmount("")
     setShowPaymentModal(true)
   }
 
@@ -858,7 +1037,7 @@ export default function POSPage() {
                 {locations.map((loc) => (
                   <button
                     key={loc.id}
-                    onClick={() => { setSelectedLocation(loc); setLocationDropdown(false); setShift(null) }}
+                    onClick={() => { setSelectedLocation(loc); setLocationDropdown(false); setShift(null); setCart([]) }}
                     className={`w-full text-left px-4 py-2.5 text-sm transition-colors ${
                       selectedLocation?.id === loc.id
                         ? "bg-blue-700 text-white"
@@ -882,8 +1061,22 @@ export default function POSPage() {
         )}
 
         <div className="ml-auto flex items-center gap-2">
+          {shift && (
+            <button
+              onClick={() => { setShowQrPanel(true); fetchQrOrders() }}
+              className="relative flex items-center gap-1.5 text-slate-300 hover:text-white text-sm px-3 py-1.5 bg-slate-800 hover:bg-slate-700 rounded-lg transition-colors"
+            >
+              <Bell className="w-3.5 h-3.5" />
+              <span className="hidden sm:block">Pesanan Masuk</span>
+              {qrOrders.length > 0 && (
+                <span className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center">
+                  {qrOrders.length}
+                </span>
+              )}
+            </button>
+          )}
           <Link
-            href="/pos/orders"
+            href={`/pos/orders${selectedLocation ? `?locationId=${selectedLocation.id}` : ""}`}
             className="flex items-center gap-1.5 text-slate-300 hover:text-white text-sm px-3 py-1.5 bg-slate-800 hover:bg-slate-700 rounded-lg transition-colors"
           >
             <ClipboardList className="w-3.5 h-3.5" />
@@ -1055,24 +1248,30 @@ export default function POSPage() {
         <div className="w-full md:w-80 xl:w-96 flex flex-col bg-white border-t md:border-t-0 md:border-l border-slate-200 shrink-0 max-h-64 md:max-h-none">
 
           {/* Held orders bar */}
-          {heldOrders.length > 0 && (
-            <button
-              onClick={() => setShowHeldModal(true)}
-              className="flex items-center gap-2 px-4 py-2 bg-amber-50 border-b border-amber-200 hover:bg-amber-100 transition-colors w-full text-left"
-            >
-              <Pause className="w-3.5 h-3.5 text-amber-600 shrink-0" />
-              <span className="text-xs font-semibold text-amber-700 flex-1">
-                {heldOrders.length} order ditahan
-              </span>
-              <span className="text-xs text-amber-500 font-medium">Lihat →</span>
-            </button>
-          )}
+          {heldOrders.length > 0 && (() => {
+            const tabCount = new Set(heldOrders.filter(o => o.tableNumber).map(o => o.tableNumber)).size
+                           + heldOrders.filter(o => !o.tableNumber).length
+            return (
+              <button
+                onClick={() => setShowHeldModal(true)}
+                className="flex items-center gap-2 px-4 py-2 bg-amber-50 border-b border-amber-200 hover:bg-amber-100 transition-colors w-full text-left"
+              >
+                <Pause className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                <span className="text-xs font-semibold text-amber-700 flex-1">
+                  {tabCount} tab aktif
+                </span>
+                <span className="text-xs text-amber-500 font-medium">Lihat →</span>
+              </button>
+            )
+          })()}
 
           {/* Resume banner */}
-          {heldOrderId && (
+          {(heldOrderId || batchHeldIds.length > 0) && (
             <div className="flex items-center gap-2 px-4 py-2 bg-blue-50 border-b border-blue-200">
               <Play className="w-3.5 h-3.5 text-blue-600 shrink-0" />
-              <span className="text-xs font-semibold text-blue-700 flex-1">Melanjutkan order ditahan</span>
+              <span className="text-xs font-semibold text-blue-700 flex-1">
+                {batchHeldIds.length > 1 ? `Tab Meja ${tableNumber} (${batchHeldIds.length} pesanan)` : "Melanjutkan order ditahan"}
+              </span>
               <button
                 onClick={resetOrder}
                 className="text-xs text-blue-500 hover:text-blue-700 font-medium"
@@ -1100,21 +1299,27 @@ export default function POSPage() {
 
             <div className="flex flex-col gap-2">
               {orderType === "DINE_IN" && (
+                <div>
+                  <input
+                    type="text"
+                    placeholder="No. Meja *"
+                    value={tableNumber}
+                    onChange={(e) => { setTableNumber(e.target.value); setTableErr(false) }}
+                    className={`w-full px-3 py-2 text-sm rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 border ${tableErr ? "border-red-400 bg-red-50 placeholder:text-red-400" : "border-slate-200"}`}
+                  />
+                  {tableErr && <p className="text-xs text-red-500 mt-1 ml-1">Nomor meja wajib diisi</p>}
+                </div>
+              )}
+              <div>
                 <input
                   type="text"
-                  placeholder="No. Meja"
-                  value={tableNumber}
-                  onChange={(e) => setTableNumber(e.target.value)}
-                  className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder={orderType === "DINE_IN" ? "Nama pelanggan *" : "Nama pelanggan"}
+                  value={customerName}
+                  onChange={(e) => { setCustomerName(e.target.value); setNameErr(false) }}
+                  className={`w-full px-3 py-2 text-sm rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 border ${nameErr && orderType === "DINE_IN" ? "border-red-400 bg-red-50 placeholder:text-red-400" : "border-slate-200"}`}
                 />
-              )}
-              <input
-                type="text"
-                placeholder="Nama pelanggan"
-                value={customerName}
-                onChange={(e) => setCustomerName(e.target.value)}
-                className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
+                {nameErr && orderType === "DINE_IN" && <p className="text-xs text-red-500 mt-1 ml-1">Nama pelanggan wajib diisi</p>}
+              </div>
             </div>
           </div>
 
@@ -1240,7 +1445,7 @@ export default function POSPage() {
                   {applicableRules.map((rule) => (
                     <button
                       key={rule.id}
-                      onClick={() => setDiscount({ type: rule.type, value: Number(rule.value), label: rule.name })}
+                      onClick={() => setDiscount({ type: rule.type, value: Number(rule.value), label: rule.name, ruleId: rule.id })}
                       className="flex items-center gap-1 px-2.5 py-1 bg-green-50 border border-green-200 text-green-700 text-xs font-medium rounded-full hover:bg-green-100 transition-colors"
                     >
                       <span>✦</span>
@@ -1286,7 +1491,7 @@ export default function POSPage() {
                       </button>
                     ))}
                     {discount.value > 0 && (
-                      <button onClick={() => setDiscount({ ...discount, value: 0, label: "" })} className="px-2.5 py-1 text-xs font-medium rounded-full border border-red-200 text-red-500 hover:bg-red-50 transition-colors">Hapus</button>
+                      <button onClick={() => setDiscount({ ...discount, value: 0, label: "", ruleId: null })} className="px-2.5 py-1 text-xs font-medium rounded-full border border-red-200 text-red-500 hover:bg-red-50 transition-colors">Hapus</button>
                     )}
                   </div>
                 )}
@@ -1403,22 +1608,21 @@ export default function POSPage() {
               <h2 className="text-base font-bold text-slate-900">Pembayaran</h2>
               <div className="flex items-center gap-1.5 flex-wrap justify-end">
                 {([
-                  { method: "CASH", label: "Tunai" },
-                  { method: "QRIS", label: "QRIS" },
-                  { method: "GOFOOD", label: "GoFood" },
-                  { method: "GRABFOOD", label: "GrabFood" },
-                  { method: "SHOPEEFOOD", label: "ShopeeFood" },
-                ] as const).map(({ method, label }) => (
-                  <button
-                    key={method}
-                    onClick={() => { setPaymentMethod(method); setCashAmount(""); setPlatformOrderNumber(""); setPayError(null) }}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
-                      paymentMethod === method ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"
-                    }`}
-                  >
-                    {label}
-                  </button>
-                ))}
+                  { method: "CASH",     label: "Tunai" },
+                  { method: "QRIS",     label: "QRIS" },
+                  { method: "TRANSFER", label: "Transfer" },
+                  { method: "GOFOOD",   label: "Online" },
+                  { method: "OTHER",    label: "Lainnya" },
+                ] as const).map(({ method, label }) => {
+                  const isOnline = ["GOFOOD","GRABFOOD","SHOPEEFOOD"].includes(paymentMethod)
+                  const active = method === "GOFOOD" ? isOnline : paymentMethod === method
+                  return (
+                    <button key={method}
+                      onClick={() => { setPaymentMethod(method); setCashAmount(""); setPlatformOrderNumber(""); setPayError(null) }}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${active ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"}`}
+                    >{label}</button>
+                  )
+                })}
                 <button onClick={() => setShowPaymentModal(false)} className="p-1.5 hover:bg-slate-100 rounded-lg ml-1">
                   <X className="w-4 h-4 text-slate-500" />
                 </button>
@@ -1426,8 +1630,24 @@ export default function POSPage() {
             </div>
 
             {["GOFOOD", "GRABFOOD", "SHOPEEFOOD"].includes(paymentMethod) ? (
-              /* ── DELIVERY PLATFORM ── */
+              /* ── PESANAN ONLINE ── */
               <div className="flex flex-col px-6 py-5 gap-4">
+                {/* Platform sub-selector */}
+                <div className="flex gap-2">
+                  {([
+                    { m: "GOFOOD",    label: "GoFood",    color: "bg-red-500" },
+                    { m: "GRABFOOD",  label: "GrabFood",  color: "bg-green-600" },
+                    { m: "SHOPEEFOOD",label: "ShopeeFood",color: "bg-orange-500" },
+                  ] as const).map(({ m, label, color }) => (
+                    <button key={m}
+                      onClick={() => { setPaymentMethod(m); setPlatformOrderNumber("") }}
+                      className={`flex-1 py-2 rounded-xl text-xs font-bold text-white transition-colors ${
+                        paymentMethod === m ? color : "bg-slate-200 text-slate-500"
+                      }`}
+                    >{label}</button>
+                  ))}
+                </div>
+
                 <div className="bg-slate-50 rounded-2xl px-5 py-4 flex items-center justify-between">
                   <div>
                     <div className="text-xs text-slate-400 font-medium uppercase tracking-wide">Total Tagihan</div>
@@ -1449,11 +1669,11 @@ export default function POSPage() {
                     placeholder={`Contoh: ${paymentMethod === "GOFOOD" ? "GF-12345678" : paymentMethod === "GRABFOOD" ? "GB-ABCD1234" : "SF-87654321"}`}
                     className="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
-                  <p className="text-xs text-slate-400 mt-1">Nomor ini dari notifikasi {paymentMethod === "GOFOOD" ? "GoBiz" : paymentMethod === "GRABFOOD" ? "GrabMerchant" : "ShopeeFood"}</p>
+                  <p className="text-xs text-slate-400 mt-1">Nomor dari notifikasi {paymentMethod === "GOFOOD" ? "GoBiz" : paymentMethod === "GRABFOOD" ? "GrabMerchant" : "ShopeeFood"}</p>
                 </div>
 
                 <div className="bg-blue-50 rounded-xl px-4 py-3 text-xs text-blue-600">
-                  Pembayaran akan di-settle oleh {paymentMethod === "GOFOOD" ? "GoFood" : paymentMethod === "GRABFOOD" ? "GrabFood" : "ShopeeFood"} ke rekening bisnis Anda
+                  Pembayaran di-settle oleh {paymentMethod === "GOFOOD" ? "GoFood" : paymentMethod === "GRABFOOD" ? "GrabFood" : "ShopeeFood"} ke rekening bisnis Anda
                 </div>
 
                 {payError && (
@@ -1462,14 +1682,72 @@ export default function POSPage() {
                     <span>{payError}</span>
                   </div>
                 )}
-                <button
-                  onClick={handlePay}
-                  disabled={paying}
+                <button onClick={handlePay} disabled={paying}
                   className="w-full py-4 bg-green-500 hover:bg-green-600 disabled:bg-slate-200 disabled:text-slate-400 text-white font-bold text-base rounded-2xl transition-colors shadow-sm"
-                >
-                  {paying ? "Memproses..." : "Konfirmasi Pembayaran"}
-                </button>
+                >{paying ? "Memproses..." : "Konfirmasi Pembayaran"}</button>
               </div>
+
+            ) : paymentMethod === "TRANSFER" ? (
+              /* ── TRANSFER BANK ── */
+              <div className="flex flex-col px-6 py-5 gap-4">
+                <div className="bg-slate-50 rounded-2xl px-5 py-4 flex items-center justify-between">
+                  <div>
+                    <div className="text-xs text-slate-400 font-medium uppercase tracking-wide">Total Tagihan</div>
+                    <div className="text-2xl font-bold text-slate-900 mt-0.5">{formatRp(total)}</div>
+                  </div>
+                  <div className="w-10 h-10 bg-blue-100 rounded-xl flex items-center justify-center">
+                    <svg className="w-5 h-5 text-blue-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                      <path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/>
+                      <polyline points="9 22 9 12 15 12 15 22"/>
+                    </svg>
+                  </div>
+                </div>
+                <div className="bg-blue-50 rounded-xl px-4 py-3 text-xs text-blue-600">
+                  Pastikan transfer sudah diterima sebelum konfirmasi
+                </div>
+                {payError && (
+                  <div className="px-3 py-2 bg-red-50 border border-red-200 rounded-xl text-red-600 text-sm flex items-start gap-2">
+                    <span className="shrink-0 mt-0.5">⚠</span>
+                    <span>{payError}</span>
+                  </div>
+                )}
+                <button onClick={handlePay} disabled={paying}
+                  className="w-full py-4 bg-green-500 hover:bg-green-600 disabled:bg-slate-200 disabled:text-slate-400 text-white font-bold text-base rounded-2xl transition-colors shadow-sm"
+                >{paying ? "Memproses..." : "Konfirmasi Transfer"}</button>
+              </div>
+
+            ) : paymentMethod === "OTHER" ? (
+              /* ── LAINNYA ── */
+              <div className="flex flex-col px-6 py-5 gap-4">
+                <div className="bg-slate-50 rounded-2xl px-5 py-4 flex items-center justify-between">
+                  <div>
+                    <div className="text-xs text-slate-400 font-medium uppercase tracking-wide">Total Tagihan</div>
+                    <div className="text-2xl font-bold text-slate-900 mt-0.5">{formatRp(total)}</div>
+                  </div>
+                  <div className="w-10 h-10 bg-slate-200 rounded-xl flex items-center justify-center">
+                    <svg className="w-5 h-5 text-slate-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                      <circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/>
+                    </svg>
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-slate-500 mb-1.5">Catatan <span className="text-slate-400 font-normal">(opsional)</span></label>
+                  <input type="text" value={platformOrderNumber} onChange={(e) => setPlatformOrderNumber(e.target.value)}
+                    placeholder="Contoh: kartu kredit, voucher, dll."
+                    className="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+                {payError && (
+                  <div className="px-3 py-2 bg-red-50 border border-red-200 rounded-xl text-red-600 text-sm flex items-start gap-2">
+                    <span className="shrink-0 mt-0.5">⚠</span>
+                    <span>{payError}</span>
+                  </div>
+                )}
+                <button onClick={handlePay} disabled={paying}
+                  className="w-full py-4 bg-green-500 hover:bg-green-600 disabled:bg-slate-200 disabled:text-slate-400 text-white font-bold text-base rounded-2xl transition-colors shadow-sm"
+                >{paying ? "Memproses..." : "Konfirmasi Pembayaran"}</button>
+              </div>
+
             ) : paymentMethod === "CASH" ? (
               /* ── TUNAI: 2-column layout ── */
               <div className="flex">
@@ -1659,82 +1937,313 @@ export default function POSPage() {
       )}
 
       {/* Held Orders Modal */}
-      {showHeldModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
-          <div className="absolute inset-0 bg-black/60" onClick={() => setShowHeldModal(false)} />
-          <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md z-10 overflow-hidden">
-            <div className="flex items-center justify-between p-5 border-b border-slate-100">
-              <div>
-                <h2 className="text-base font-bold text-slate-900">Order Ditahan</h2>
-                <p className="text-xs text-slate-400 mt-0.5">{heldOrders.length} order menunggu dilanjutkan</p>
+      {showHeldModal && (() => {
+        // Grup berdasarkan guestSessionId (jika ada) atau tableNumber
+        // Ini memastikan 2 customer beda di meja sama = 2 tab terpisah
+        const tableGroups: Record<string, HeldOrder[]> = {}
+        const noTable: HeldOrder[] = []
+        for (const o of heldOrders) {
+          if (o.tableNumber) {
+            const key = o.guestSessionId ?? `table::${o.tableNumber}`
+            ;(tableGroups[key] ??= []).push(o)
+          } else {
+            noTable.push(o)
+          }
+        }
+        const tabCount = Object.keys(tableGroups).length + noTable.length
+
+        function lanjutkanSingle(held: HeldOrder) {
+          setCart(held.items.map(i => ({
+            cartKey: `held::${i.id}`,
+            productId: i.menuItemId ?? i.id,
+            name: i.name,
+            price: Number(i.price),
+            qty: i.qty,
+            itemDiscountType: "AMOUNT" as const,
+            itemDiscountValue: Number(i.discount),
+            notes: i.notes ?? "",
+            modifiers: (i.modifiers ?? []).map(m => ({ groupId: "", groupName: m.groupName, optionId: "", optionName: m.optionName, price: m.price })),
+          })))
+          setHeldOrderId(held.id)
+          setBatchHeldIds([])
+          if (held.tableNumber) setTableNumber(held.tableNumber)
+          if (held.customerName) setCustomerName(held.customerName)
+          if (Number(held.discountValue) > 0) {
+            setDiscount({ type: (held.discountType ?? "PERCENT") as "PERCENT" | "AMOUNT", value: Number(held.discountValue), label: held.discountLabel ?? "", ruleId: null })
+          }
+          setShowHeldModal(false)
+        }
+
+        function lanjutkanTable(orders: HeldOrder[]) {
+          const merged = orders.flatMap(held => held.items.map(i => ({
+            cartKey: `held::${i.id}`,
+            productId: i.menuItemId ?? i.id,
+            name: i.name,
+            price: Number(i.price),
+            qty: i.qty,
+            itemDiscountType: "AMOUNT" as const,
+            itemDiscountValue: Number(i.discount),
+            notes: i.notes ?? "",
+            modifiers: (i.modifiers ?? []).map(m => ({ groupId: "", groupName: m.groupName, optionId: "", optionName: m.optionName, price: m.price })),
+          })))
+          setCart(merged)
+          setHeldOrderId(null)
+          setBatchHeldIds(orders.map(o => o.id))
+          if (orders[0].tableNumber) setTableNumber(orders[0].tableNumber)
+          setShowHeldModal(false)
+        }
+
+        async function batalkanOrders(orders: HeldOrder[]) {
+          await Promise.all(orders.map(o =>
+            fetch(`/api/pos/orders/${o.id}/pay`, { method: "DELETE" })
+          ))
+          fetchHeldOrders()
+        }
+
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
+            <div className="absolute inset-0 bg-black/60" onClick={() => setShowHeldModal(false)} />
+            <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md z-10 overflow-hidden">
+              <div className="flex items-center justify-between p-5 border-b border-slate-100">
+                <div>
+                  <h2 className="text-base font-bold text-slate-900">Tab Aktif</h2>
+                  <p className="text-xs text-slate-400 mt-0.5">{tabCount} tab menunggu pembayaran</p>
+                </div>
+                <button onClick={() => setShowHeldModal(false)} className="p-1.5 hover:bg-slate-100 rounded-lg">
+                  <X className="w-4 h-4 text-slate-500" />
+                </button>
               </div>
-              <button onClick={() => setShowHeldModal(false)} className="p-1.5 hover:bg-slate-100 rounded-lg">
+              <div className="max-h-[65vh] overflow-y-auto divide-y divide-slate-100">
+                {heldOrders.length === 0 ? (
+                  <div className="p-8 text-center text-slate-400 text-sm">Belum ada tab aktif</div>
+                ) : (
+                  <>
+                    {/* Grup per meja */}
+                    {Object.entries(tableGroups).map(([table, orders]) => {
+                      const tableTotal = orders.reduce((s, o) => s + Number(o.total), 0)
+                      const allItems = orders.flatMap(o => o.items)
+                      const latest = orders.reduce((a, b) => new Date(a.createdAt) > new Date(b.createdAt) ? a : b)
+                      return (
+                        <div key={table} className="p-4">
+                          <div className="flex items-start justify-between gap-3 mb-2">
+                            <div>
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span className="font-bold text-slate-900 text-sm">Meja {orders[0].tableNumber}</span>
+                                {orders[0].customerName && (
+                                  <span className="text-xs bg-slate-100 text-slate-600 font-medium px-2 py-0.5 rounded-full">{orders[0].customerName}</span>
+                                )}
+                                {orders.length > 1 && (
+                                  <span className="text-xs bg-blue-100 text-blue-700 font-semibold px-2 py-0.5 rounded-full">{orders.length} pesanan</span>
+                                )}
+                              </div>
+                              <div className="text-xs text-slate-400 mt-0.5">
+                                Terakhir {new Date(latest.createdAt).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" })}
+                                {" · "}{allItems.reduce((s, i) => s + i.qty, 0)} item
+                              </div>
+                            </div>
+                            <div className="font-bold text-slate-900 text-sm shrink-0">{formatRp(tableTotal)}</div>
+                          </div>
+                          <div className="text-xs text-slate-500 mb-3 line-clamp-2">
+                            {allItems.map(i => `${i.qty}× ${i.name}`).join(", ")}
+                          </div>
+                          <div className="flex gap-2">
+                            <button
+                              onClick={() => batalkanOrders(orders)}
+                              className="flex items-center gap-1 px-3 py-1.5 text-xs text-red-500 border border-red-200 hover:bg-red-50 rounded-lg font-medium transition-colors"
+                            >
+                              <Trash2 className="w-3 h-3" /> Batalkan
+                            </button>
+                            <button
+                              onClick={() => orders.length === 1 ? lanjutkanSingle(orders[0]) : lanjutkanTable(orders)}
+                              className="flex-1 flex items-center justify-center gap-1.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg transition-colors"
+                            >
+                              <Play className="w-3 h-3" /> Bayar Sekarang
+                            </button>
+                          </div>
+                        </div>
+                      )
+                    })}
+
+                    {/* Order tanpa meja (takeaway/delivery/dll) */}
+                    {noTable.map(held => (
+                      <div key={held.id} className="p-4">
+                        <div className="flex items-start justify-between gap-3 mb-2">
+                          <div>
+                            <div className="font-semibold text-slate-900 text-sm">
+                              {held.customerName ?? "Takeaway"}
+                            </div>
+                            <div className="text-xs text-slate-400 mt-0.5">
+                              {new Date(held.createdAt).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" })}
+                              {" · "}{held.items.length} item
+                            </div>
+                          </div>
+                          <div className="font-bold text-slate-900 text-sm shrink-0">{formatRp(Number(held.total))}</div>
+                        </div>
+                        <div className="text-xs text-slate-500 mb-3 line-clamp-2">
+                          {held.items.map(i => `${i.qty}× ${i.name}`).join(", ")}
+                        </div>
+                        <div className="flex gap-2">
+                          <button
+                            onClick={async () => {
+                              await fetch(`/api/pos/orders/${held.id}/pay`, { method: "DELETE" })
+                              fetchHeldOrders()
+                            }}
+                            className="flex items-center gap-1 px-3 py-1.5 text-xs text-red-500 border border-red-200 hover:bg-red-50 rounded-lg font-medium transition-colors"
+                          >
+                            <Trash2 className="w-3 h-3" /> Batalkan
+                          </button>
+                          <button
+                            onClick={() => lanjutkanSingle(held)}
+                            className="flex-1 flex items-center justify-center gap-1.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg transition-colors"
+                          >
+                            <Play className="w-3 h-3" /> Bayar Sekarang
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </>
+                )}
+              </div>
+            </div>
+          </div>
+        )
+      })()}
+
+      {/* QR Incoming Orders Panel */}
+      {showQrPanel && (
+        <div className="fixed inset-0 z-40 flex items-end sm:items-center justify-center">
+          <div className="absolute inset-0 bg-black/50" onClick={() => setShowQrPanel(false)} />
+          <div className="relative bg-white rounded-t-2xl sm:rounded-2xl w-full max-w-md max-h-[80vh] flex flex-col shadow-2xl z-10">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100 shrink-0">
+              <div className="flex items-center gap-2">
+                <Bell className="w-4 h-4 text-blue-600" />
+                <h2 className="font-bold text-slate-900">Pesanan Masuk</h2>
+                {qrOrders.length > 0 && (
+                  <span className="bg-red-500 text-white text-xs font-bold px-2 py-0.5 rounded-full">{qrOrders.length}</span>
+                )}
+              </div>
+              <button onClick={() => setShowQrPanel(false)} className="p-1.5 hover:bg-slate-100 rounded-lg">
                 <X className="w-4 h-4 text-slate-500" />
               </button>
             </div>
-            <div className="max-h-[60vh] overflow-y-auto divide-y divide-slate-100">
-              {heldOrders.length === 0 ? (
-                <div className="p-8 text-center text-slate-400 text-sm">Tidak ada order ditahan</div>
-              ) : heldOrders.map((held) => (
-                <div key={held.id} className="p-4">
-                  <div className="flex items-start justify-between gap-3 mb-2">
-                    <div>
-                      <div className="font-semibold text-slate-900 text-sm">
-                        {held.customerName ?? (held.tableNumber ? `Meja ${held.tableNumber}` : "Tanpa Nama")}
-                      </div>
-                      <div className="text-xs text-slate-400 mt-0.5">
-                        {"Ditahan pukul "}{new Date(held.createdAt).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" })}
-                        {" · "}{held.items.length} item
-                      </div>
-                    </div>
-                    <div className="text-right shrink-0">
-                      <div className="font-bold text-slate-900 text-sm">{formatRp(Number(held.total))}</div>
-                    </div>
-                  </div>
-                  <div className="text-xs text-slate-500 mb-3 line-clamp-2">
-                    {held.items.map(i => `${i.qty}× ${i.name}`).join(", ")}
-                  </div>
-                  <div className="flex gap-2">
-                    <button
-                      onClick={async () => {
-                        await fetch(`/api/pos/orders/${held.id}/pay`, { method: "DELETE" })
-                        fetchHeldOrders()
-                      }}
-                      className="flex items-center gap-1 px-3 py-1.5 text-xs text-red-500 border border-red-200 hover:bg-red-50 rounded-lg font-medium transition-colors"
-                    >
-                      <Trash2 className="w-3 h-3" />
-                      Batalkan
-                    </button>
-                    <button
-                      onClick={() => {
-                        const newCart = held.items.map(i => ({
-                          cartKey: `held::${i.id}`,
-                          productId: i.menuItemId ?? i.id,
-                          name: i.name,
-                          price: Number(i.price),
-                          qty: i.qty,
-                          itemDiscountType: "AMOUNT" as const,
-                          itemDiscountValue: Number(i.discount),
-                          notes: i.notes ?? "",
-                          modifiers: [],
-                        }))
-                        setCart(newCart)
-                        setHeldOrderId(held.id)
-                        if (held.tableNumber) setTableNumber(held.tableNumber)
-                        if (held.customerName) setCustomerName(held.customerName)
-                        if (Number(held.discountValue) > 0) {
-                          setDiscount({ type: (held.discountType ?? "PERCENT") as "PERCENT" | "AMOUNT", value: Number(held.discountValue), label: held.discountLabel ?? "" })
-                        }
-                        setShowHeldModal(false)
-                      }}
-                      className="flex-1 flex items-center justify-center gap-1.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg transition-colors"
-                    >
-                      <Play className="w-3 h-3" />
-                      Lanjutkan
-                    </button>
-                  </div>
+            <div className="flex-1 overflow-y-auto">
+              {qrOrders.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-14 text-center px-6">
+                  <UtensilsCrossed className="w-10 h-10 text-slate-200 mb-3" />
+                  <p className="text-slate-400 font-medium text-sm">Belum ada pesanan masuk</p>
+                  <p className="text-slate-300 text-xs mt-1">Pesanan dari QR menu akan muncul di sini</p>
                 </div>
-              ))}
+              ) : (() => {
+                // Group by tableNumber so all orders from one table form a single tab
+                const groups: Record<string, QrOrder[]> = {}
+                for (const o of qrOrders) {
+                  const key = o.tableNumber ?? "__none__"
+                  ;(groups[key] ??= []).push(o)
+                }
+                return (
+                  <div className="divide-y divide-slate-100">
+                    {Object.entries(groups).map(([tableKey, orders]) => {
+                      const tableTotal = orders.reduce((s, o) => s + Number(o.total), 0)
+                      const allItems = orders.flatMap(o => o.items)
+                      const isMulti = orders.length > 1
+                      return (
+                        <div key={tableKey} className="px-5 py-4">
+                          {/* Table header */}
+                          <div className="flex items-center justify-between mb-3">
+                            <div className="flex items-center gap-2">
+                              {tableKey !== "__none__" ? (
+                                <span className="bg-blue-600 text-white text-xs font-bold px-2.5 py-1 rounded-full">Meja {tableKey}</span>
+                              ) : (
+                                <span className="bg-slate-200 text-slate-600 text-xs font-semibold px-2.5 py-1 rounded-full">Tanpa Meja</span>
+                              )}
+                              {isMulti && (
+                                <span className="text-xs text-slate-400">{orders.length} pesanan</span>
+                              )}
+                            </div>
+                            <span className="font-black text-slate-900 text-sm">{formatRp(tableTotal)}</span>
+                          </div>
+
+                          {/* All items combined */}
+                          <div className="bg-slate-50 rounded-xl px-3 py-2.5 mb-3 space-y-1">
+                            {allItems.map((item) => (
+                              <div key={item.id} className="flex justify-between text-xs text-slate-600">
+                                <span>{item.qty}× {item.name}</span>
+                                <span className="text-slate-400">{formatRp(Number(item.price) * item.qty)}</span>
+                              </div>
+                            ))}
+                          </div>
+
+                          {/* Per-order timestamps for multi-order tables */}
+                          {isMulti && (
+                            <div className="flex flex-wrap gap-1.5 mb-3">
+                              {orders.map(o => (
+                                <span key={o.id} className="text-xs bg-slate-100 text-slate-500 px-2 py-0.5 rounded-md">
+                                  {new Date(o.createdAt).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" })}
+                                </span>
+                              ))}
+                            </div>
+                          )}
+
+                          <div className="flex gap-2">
+                            {isMulti ? (
+                              <button
+                                onClick={() => ambilQrTable(orders)}
+                                className="flex-1 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold rounded-xl transition-colors"
+                              >
+                                Ambil Semua
+                              </button>
+                            ) : (
+                              <button
+                                onClick={() => ambilQrOrder(orders[0])}
+                                className="flex-1 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold rounded-xl transition-colors"
+                              >
+                                Ambil
+                              </button>
+                            )}
+                            <button
+                              onClick={() => setTolakConfirm(orders)}
+                              className="px-4 py-2.5 bg-red-50 hover:bg-red-100 text-red-600 text-sm font-bold rounded-xl transition-colors border border-red-200"
+                            >
+                              Tolak
+                            </button>
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                )
+              })()}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Tolak Confirmation Dialog */}
+      {tolakConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
+          <div className="absolute inset-0 bg-black/50" onClick={() => !tolaking && setTolakConfirm(null)} />
+          <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-sm z-10 p-6">
+            <h3 className="font-bold text-slate-900 text-base mb-1">Tolak pesanan ini?</h3>
+            <p className="text-sm text-slate-500 mb-4">
+              {tolakConfirm[0]?.tableNumber
+                ? `${tolakConfirm.length > 1 ? `${tolakConfirm.length} pesanan dari Meja ${tolakConfirm[0].tableNumber}` : `Pesanan dari Meja ${tolakConfirm[0].tableNumber}`} akan dibatalkan dan tidak bisa dikembalikan.`
+                : "Pesanan ini akan dibatalkan dan tidak bisa dikembalikan."}
+            </p>
+            <div className="flex gap-2">
+              <button
+                onClick={() => setTolakConfirm(null)}
+                disabled={tolaking}
+                className="flex-1 py-2.5 rounded-xl border border-slate-200 text-sm font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-40 transition-colors"
+              >
+                Batal
+              </button>
+              <button
+                onClick={confirmTolak}
+                disabled={tolaking}
+                className="flex-1 py-2.5 rounded-xl bg-red-600 hover:bg-red-700 text-white text-sm font-bold disabled:opacity-40 transition-colors"
+              >
+                {tolaking ? "Menolak..." : "Ya, Tolak"}
+              </button>
             </div>
           </div>
         </div>
@@ -1855,24 +2364,13 @@ export default function POSPage() {
 
               {/* Actions */}
               <div className="px-4 pb-4 pt-2 space-y-2 border-t border-slate-100">
-                <div className="flex gap-2">
-                  <button
-                    onClick={() => window.print()}
-                    className="flex-1 flex items-center justify-center gap-1.5 border border-slate-200 hover:bg-slate-50 text-slate-700 font-medium py-2.5 rounded-xl text-sm transition-colors"
-                  >
-                    <Printer className="w-4 h-4" />
-                    Cetak
-                  </button>
-                  <button
-                    onClick={() => window.open(`https://wa.me/?text=${encodeURIComponent(waLines.join("\n"))}`, "_blank")}
-                    className="flex-1 flex items-center justify-center gap-1.5 border border-green-200 bg-green-50 hover:bg-green-100 text-green-700 font-medium py-2.5 rounded-xl text-sm transition-colors"
-                  >
-                    <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
-                      <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347"/>
-                    </svg>
-                    WhatsApp
-                  </button>
-                </div>
+                <button
+                  onClick={() => window.print()}
+                  className="w-full flex items-center justify-center gap-1.5 border border-slate-200 hover:bg-slate-50 text-slate-700 font-medium py-2.5 rounded-xl text-sm transition-colors"
+                >
+                  <Printer className="w-4 h-4" />
+                  Cetak Struk
+                </button>
                 <button
                   onClick={resetOrder}
                   className="w-full bg-slate-900 hover:bg-slate-800 text-white font-semibold py-3 rounded-xl text-sm transition-colors"

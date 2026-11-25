@@ -27,6 +27,14 @@ sehingga tidak dapat dipakai dari server Hostinger. Ambil connection string dan
 konfigurasi TLS dari penyedia database; jangan menonaktifkan verifikasi TLS.
 Migrasi memerlukan koneksi yang didukung Prisma Migrate oleh penyedia tersebut.
 
+Untuk Neon, isi `DATABASE_URL` dengan koneksi pooled (hostname mengandung
+`-pooler`) dan `DIRECT_URL` dengan koneksi langsung dari proyek/branch yang sama.
+Prisma CLI memakai `DIRECT_URL` jika terisi; aplikasi tetap memakai
+`DATABASE_URL`. Gunakan `sslmode=verify-full` agar sertifikat TLS diverifikasi.
+Nilai koneksi Pantau disimpan lokal di `.env.neon.local` yang diabaikan Git.
+File ini tidak dibaca otomatis oleh Next.js; masukkan kedua nilai tersebut ke
+environment Hostinger saat deployment.
+
 Isi `NEXTAUTH_SECRET` dengan secret acak minimal 32 byte.
 Isi `WHATSAPP_ENCRYPTION_KEY` dengan kunci acak 32 byte dalam format hex
 (64 karakter). Saat memindahkan database yang sudah berisi token WhatsApp

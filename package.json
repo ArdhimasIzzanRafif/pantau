@@ -14,7 +14,7 @@
     "db:reset": "npx prisma migrate reset --force && npm run seed",
     "wipe-demo": "tsx prisma/wipe-demo.ts",
     "db:deploy": "prisma migrate deploy",
-    "build:hostinger": "npm run db:deploy && npm run build"
+    "build:hostinger": "npm run db:deploy && npm run build -- --webpack"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"

@@ -15,7 +15,8 @@ Website memakai Next.js 16, Node.js 22 dan PostgreSQL melalui Prisma 7.
   `.env.example` hanya mencantumkan nama variabel dan nilai aman.
 
 `build:hostinger` menjalankan `prisma migrate deploy`, lalu `prisma generate`
-dan `next build`. Database harus sudah tersedia sebelum command ini dijalankan.
+dan `next build --webpack`. Webpack menghindari kegagalan proses helper CSS
+Turbopack pada lingkungan build Hostinger. Database harus sudah tersedia sebelum command ini dijalankan.
 Untuk build tanpa menjalankan migrasi gunakan `npm run build`.
 Tidak ada seed, reset, atau penghapusan data otomatis pada build.
 

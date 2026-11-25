@@ -2,26 +2,21 @@
 
 import { signOut } from "next-auth/react"
 import { useState } from "react"
-import { BarChart3, ShieldOff, Loader2 } from "lucide-react"
+import { ShieldOff, Loader2 } from "lucide-react"
+import { OrganizationStatusGuard } from "@/components/organization-status-guard"
 
 export default function SuspendedPage() {
   const [signingOut, setSigningOut] = useState(false)
 
   async function handleSignOut() {
     setSigningOut(true)
-    await signOut({ redirectTo: "/login" })
+    await signOut({ redirect: false }); window.location.href = "/login"
   }
 
   return (
     <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
+      <OrganizationStatusGuard />
       <div className="max-w-sm w-full">
-        <div className="flex items-center gap-2.5 justify-center mb-10">
-          <div className="w-9 h-9 bg-blue-600 rounded-xl flex items-center justify-center">
-            <BarChart3 className="w-5 h-5 text-white" />
-          </div>
-          <span className="text-xl font-bold text-slate-900 tracking-tight">Pantau</span>
-        </div>
-
         <div className="bg-white rounded-2xl border border-slate-200 p-8 text-center shadow-sm">
           <div className="w-16 h-16 bg-red-50 rounded-2xl flex items-center justify-center mx-auto mb-5">
             <ShieldOff className="w-8 h-8 text-red-500" />

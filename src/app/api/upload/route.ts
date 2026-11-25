@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server"
-import { writeFile } from "fs/promises"
+import { mkdir, writeFile } from "fs/promises"
+import crypto from "crypto"
 import path from "path"
 import { requireAuth, isResponse, ok, err } from "@/lib/api-helpers"
 
@@ -11,21 +12,31 @@ export async function POST(req: NextRequest) {
   const file = formData.get("file") as File | null
   if (!file) return err("File wajib diupload")
 
-  const allowedTypes = ["image/jpeg", "image/png", "image/webp", "image/gif"]
-  if (!allowedTypes.includes(file.type)) return err("Format file harus JPG, PNG, WebP, atau GIF")
-
-  if (file.size > 2 * 1024 * 1024) return err("Ukuran file maksimal 2MB")
-
   const folder = (formData.get("folder") as string | null) ?? "menu"
-  const allowedFolders = ["menu", "qris", "receipts"]
+  const allowedFolders = ["menu", "qris", "receipts", "stock-adjustments", "profile", "purchase-docs"]
   const safeFolder = allowedFolders.includes(folder) ? folder : "menu"
+  // Dokumen pesanan supplier (invoice) boleh PDF dan sedikit lebih besar.
+  const dokumenPesanan = safeFolder === "purchase-docs"
 
-  const ext = file.name.split(".").pop()?.toLowerCase() ?? "jpg"
-  const fileName = `${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`
-  const filePath = path.join(process.cwd(), "public", "uploads", safeFolder, fileName)
+  const allowedTypes = ["image/jpeg", "image/png", "image/webp", "image/gif", ...(dokumenPesanan ? ["application/pdf"] : [])]
+  if (!allowedTypes.includes(file.type)) return err(dokumenPesanan ? "Format file harus JPG, PNG, WebP, atau PDF" : "Format file harus JPG, PNG, WebP, atau GIF")
+
+  if (file.size > (dokumenPesanan ? 5 : 2) * 1024 * 1024) return err(`Ukuran file maksimal ${dokumenPesanan ? 5 : 2}MB`)
+
+  const extByMime: Record<string, string> = {
+    "image/jpeg": "jpg",
+    "image/png": "png",
+    "image/webp": "webp",
+    "image/gif": "gif",
+    "application/pdf": "pdf",
+  }
+  const fileName = `${Date.now()}-${crypto.randomUUID()}.${extByMime[file.type]}`
+  const targetDirectory = path.join(process.cwd(), "public", "uploads", safeFolder)
+  const filePath = path.join(targetDirectory, fileName)
 
   const buffer = Buffer.from(await file.arrayBuffer())
+  await mkdir(targetDirectory, { recursive: true })
   await writeFile(filePath, buffer)
 
-  return ok({ url: `/uploads/${safeFolder}/${fileName}` }, 201)
+  return ok({ url: `/api/uploads/${safeFolder}/${fileName}` }, 201)
 }

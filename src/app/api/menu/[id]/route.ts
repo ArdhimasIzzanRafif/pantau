@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server"
 import { prisma } from "@/lib/db"
 import { requireAuth, isResponse, ok, err } from "@/lib/api-helpers"
+import { denyUnlessCanEdit } from "@/lib/feature-access"
 
 export async function GET(
   _req: NextRequest,
@@ -28,7 +29,8 @@ export async function PATCH(
 ) {
   const user = await requireAuth()
   if (isResponse(user)) return user
-  if (user.role !== "OWNER") return err("Tidak diizinkan", 403)
+  const forbidden = await denyUnlessCanEdit(user, "MASTER_MENU")
+  if (forbidden) return forbidden
   const { id } = await params
 
   const menu = await prisma.inventoryItem.findFirst({
@@ -72,7 +74,8 @@ export async function DELETE(
 ) {
   const user = await requireAuth()
   if (isResponse(user)) return user
-  if (user.role !== "OWNER") return err("Tidak diizinkan", 403)
+  const forbidden = await denyUnlessCanEdit(user, "MASTER_MENU")
+  if (forbidden) return forbidden
   const { id } = await params
 
   const menu = await prisma.inventoryItem.findFirst({

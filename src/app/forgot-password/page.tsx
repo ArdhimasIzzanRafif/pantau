@@ -2,7 +2,8 @@
 
 import { useState } from "react"
 import Link from "next/link"
-import { BarChart3, Loader2, CheckCircle, ArrowLeft } from "lucide-react"
+import { Loader2, CheckCircle, ArrowLeft } from "lucide-react"
+import { PantauLogo } from "@/components/pantau-logo"
 
 export default function ForgotPasswordPage() {
   const [email, setEmail] = useState("")
@@ -31,9 +32,7 @@ export default function ForgotPasswordPage() {
     <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
       <div className="max-w-sm w-full">
         <div className="flex items-center gap-2.5 justify-center mb-10">
-          <div className="w-9 h-9 bg-blue-600 rounded-xl flex items-center justify-center">
-            <BarChart3 className="w-5 h-5 text-white" />
-          </div>
+          <PantauLogo className="h-9 w-9" priority />
           <span className="text-xl font-bold text-slate-900 tracking-tight">Pantau</span>
         </div>
 

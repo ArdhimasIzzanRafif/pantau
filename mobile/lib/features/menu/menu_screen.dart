@@ -1,5 +1,9 @@
+import 'dart:io';
+
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:image_picker/image_picker.dart';
 import '../../core/api/api_client.dart';
 import '../../core/theme/app_theme.dart';
 import '../../shared/widgets/widgets.dart';
@@ -254,7 +258,7 @@ class _MenuScreenState extends ConsumerState<MenuScreen> {
                       ClipRRect(
                         borderRadius: BorderRadius.circular(10),
                         child: imageUrl != null && imageUrl.isNotEmpty
-                          ? Image.network(imageUrl, width: 52, height: 52, fit: BoxFit.cover,
+                          ? Image.network(resolveApiUrl(imageUrl), width: 52, height: 52, fit: BoxFit.cover,
                               errorBuilder: (ctx, e, st) => _avatarBox(name, color))
                           : _avatarBox(name, color),
                       ),
@@ -530,6 +534,9 @@ class _MenuFormState extends State<_MenuForm> {
   String _formError = '';
   bool _formActive = true, _saving = false;
   List<_RecipeRow> _recipe = [];
+  final _imagePicker = ImagePicker();
+  XFile? _pickedImage;
+  String? _imageUrl;
 
   @override
   void initState() {
@@ -543,6 +550,7 @@ class _MenuFormState extends State<_MenuForm> {
       _skuCtrl.text   = (it['sku'] as String?) ?? '';
       _notesCtrl.text = (it['notes'] as String?) ?? '';
       _formActive     = toBool(it['isActive'], fallback: true);
+      _imageUrl       = (it['imageUrl'] as String?)?.trim();
       _recipe         = (it['recipeItems'] as List? ?? []).map((r) => _RecipeRow(itemId: (r['childItemId'] as String?) ?? '', qty: '${r['quantity'] ?? 1}')).toList();
     }
     if (_recipe.isEmpty) _recipe.add(_RecipeRow());
@@ -551,6 +559,83 @@ class _MenuFormState extends State<_MenuForm> {
   @override
   void dispose() { _nameCtrl.dispose(); _priceCtrl.dispose(); _descCtrl.dispose(); _catCtrl.dispose(); _skuCtrl.dispose(); _notesCtrl.dispose(); super.dispose(); }
 
+  Future<void> _chooseImage() async {
+    final source = await showModalBottomSheet<ImageSource>(
+      context: context,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (sheetContext) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
+          child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Center(child: Container(width: 36, height: 4, decoration: BoxDecoration(color: AppTheme.border, borderRadius: BorderRadius.circular(2)))),
+            const SizedBox(height: 18),
+            const Text('Tambahkan Foto Menu', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+            const SizedBox(height: 14),
+            Row(children: [
+              Expanded(child: _imageSourceButton(
+                icon: Icons.photo_camera_rounded,
+                label: 'Ambil Foto',
+                onTap: () => Navigator.pop(sheetContext, ImageSource.camera),
+              )),
+              const SizedBox(width: 10),
+              Expanded(child: _imageSourceButton(
+                icon: Icons.photo_library_rounded,
+                label: 'Pilih dari Galeri',
+                onTap: () => Navigator.pop(sheetContext, ImageSource.gallery),
+              )),
+            ]),
+          ]),
+        ),
+      ),
+    );
+    if (source == null || !mounted) return;
+
+    try {
+      final image = await _imagePicker.pickImage(
+        source: source,
+        imageQuality: 80,
+        maxWidth: 1440,
+        maxHeight: 1440,
+      );
+      if (image == null || !mounted) return;
+      if (await image.length() > 2 * 1024 * 1024) {
+        setState(() => _formError = 'Ukuran foto maksimal 2 MB. Pilih foto yang lebih kecil.');
+        return;
+      }
+      setState(() {
+        _pickedImage = image;
+        _imageUrl = null;
+        _formError = '';
+      });
+    } catch (_) {
+      if (mounted) setState(() => _formError = 'Kamera atau galeri tidak dapat dibuka. Periksa izin aplikasi.');
+    }
+  }
+
+  DioMediaType _imageMediaType(XFile image) {
+    final mimeType = image.mimeType?.toLowerCase();
+    if (mimeType == 'image/png') return DioMediaType('image', 'png');
+    if (mimeType == 'image/webp') return DioMediaType('image', 'webp');
+    if (mimeType == 'image/gif') return DioMediaType('image', 'gif');
+    return DioMediaType('image', 'jpeg');
+  }
+
+  Future<String> _uploadImage(XFile image) async {
+    final formData = FormData.fromMap({
+      'folder': 'menu',
+      'file': await MultipartFile.fromFile(
+        image.path,
+        filename: image.name,
+        contentType: _imageMediaType(image),
+      ),
+    });
+    final response = await api.postMultipart('/api/upload', data: formData) as Map;
+    final url = response['url'] as String?;
+    if (url == null || url.isEmpty) throw Exception('Server tidak mengembalikan URL foto');
+    return url;
+  }
+
   Future<void> _save() async {
     setState(() { _saving = true; _formError = ''; });
     try {
@@ -558,6 +643,7 @@ class _MenuFormState extends State<_MenuForm> {
       final price = int.tryParse(_priceCtrl.text.replaceAll('.', ''));
       if (price == null || price < 0) { setState(() { _formError = 'Harga tidak valid'; _saving = false; }); return; }
       final validRecipe = _recipe.where((r) => r.itemId.isNotEmpty && (double.tryParse(r.qty) ?? 0) > 0).toList();
+      final imageUrl = _pickedImage == null ? _imageUrl : await _uploadImage(_pickedImage!);
       final body = {
         'name':        _nameCtrl.text.trim(),
         'sellPrice':   price,
@@ -565,6 +651,7 @@ class _MenuFormState extends State<_MenuForm> {
         'category':    _catCtrl.text.isEmpty ? null : _catCtrl.text,
         'sku':         _skuCtrl.text.trim().isEmpty ? null : _skuCtrl.text.trim(),
         'notes':       _notesCtrl.text.isEmpty ? null : _notesCtrl.text,
+        'imageUrl':    imageUrl,
         'isActive':    _formActive,
       };
       final existingId = widget.item?['id'] as String?;
@@ -637,6 +724,12 @@ class _MenuFormState extends State<_MenuForm> {
 
             _lbl('Deskripsi'),
             TextField(controller: _descCtrl, maxLines: 2, style: const TextStyle(fontSize: 14), decoration: _dec('Deskripsi singkat menu...')),
+            const SizedBox(height: 12),
+
+            _lbl('Foto Menu'),
+            _imagePickerField(),
+            const SizedBox(height: 4),
+            const Text('JPG, PNG, WebP · maks. 2 MB. Foto akan tampil di kasir.', style: TextStyle(fontSize: 11, color: AppTheme.textMuted)),
             const SizedBox(height: 12),
 
             _lbl('Catatan Internal'),
@@ -713,6 +806,88 @@ class _MenuFormState extends State<_MenuForm> {
 
   Widget _tf(TextEditingController c, String hint) => TextField(
     controller: c, style: const TextStyle(fontSize: 14, color: AppTheme.textPrimary), decoration: _dec(hint));
+
+  Widget _imageSourceButton({required IconData icon, required String label, required VoidCallback onTap}) => OutlinedButton(
+    onPressed: onTap,
+    style: OutlinedButton.styleFrom(
+      foregroundColor: AppTheme.textPrimary,
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 16),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      side: const BorderSide(color: AppTheme.border),
+    ),
+    child: Column(children: [
+      Icon(icon, color: AppTheme.primary, size: 26),
+      const SizedBox(height: 6),
+      Text(label, textAlign: TextAlign.center, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+    ]),
+  );
+
+  Widget _imagePickerField() {
+    final hasImage = _pickedImage != null || (_imageUrl?.isNotEmpty ?? false);
+    final image = _pickedImage != null
+        ? Image.file(File(_pickedImage!.path), fit: BoxFit.cover)
+        : (_imageUrl?.isNotEmpty ?? false)
+            ? Image.network(resolveApiUrl(_imageUrl!), fit: BoxFit.cover, errorBuilder: (_, _, _) => _imagePlaceholder())
+            : null;
+
+    if (!hasImage) {
+      return InkWell(
+        onTap: _saving ? null : _chooseImage,
+        borderRadius: BorderRadius.circular(12),
+        child: Container(
+          width: double.infinity,
+          height: 116,
+          decoration: BoxDecoration(
+            color: const Color(0xFFF8FAFC),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: AppTheme.border),
+          ),
+          child: const Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+            Icon(Icons.add_a_photo_rounded, size: 28, color: AppTheme.primary),
+            SizedBox(height: 7),
+            Text('Ambil foto atau pilih dari galeri', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppTheme.textSecondary)),
+          ]),
+        ),
+      );
+    }
+
+    return Stack(children: [
+      ClipRRect(
+        borderRadius: BorderRadius.circular(12),
+        child: SizedBox(width: double.infinity, height: 150, child: image),
+      ),
+      Positioned(
+        top: 8,
+        right: 8,
+        child: Row(children: [
+          _photoAction(Icons.edit_rounded, 'Ganti foto', _chooseImage),
+          const SizedBox(width: 6),
+          _photoAction(Icons.delete_rounded, 'Hapus foto', () => setState(() {
+            _pickedImage = null;
+            _imageUrl = null;
+          }), danger: true),
+        ]),
+      ),
+    ]);
+  }
+
+  Widget _imagePlaceholder() => Container(
+    color: const Color(0xFFF1F5F9),
+    child: const Center(child: Icon(Icons.broken_image_rounded, color: AppTheme.textMuted)),
+  );
+
+  Widget _photoAction(IconData icon, String tooltip, VoidCallback onTap, {bool danger = false}) => Material(
+    color: Colors.white.withValues(alpha: 0.94),
+    shape: const CircleBorder(),
+    elevation: 2,
+    child: IconButton(
+      onPressed: _saving ? null : onTap,
+      tooltip: tooltip,
+      icon: Icon(icon, size: 18, color: danger ? AppTheme.danger : AppTheme.textSecondary),
+      constraints: const BoxConstraints.tightFor(width: 36, height: 36),
+      padding: EdgeInsets.zero,
+    ),
+  );
 
   Widget _toggle(String title, String sub, bool val, VoidCallback onTap) => GestureDetector(
     onTap: onTap,

@@ -16,7 +16,7 @@
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
+  --font-sans: var(--font-jakarta-sans);
   --font-mono: var(--font-geist-mono);
 }
 
@@ -24,11 +24,560 @@
   box-sizing: border-box;
 }
 
+/* Sisakan ruang scrollbar supaya konten tidak bergeser saat modal membuka/menutup */
+html {
+  scrollbar-gutter: stable;
+}
+
 body {
-  background: var(--background);
+  /* slate-50 — samakan dengan latar dashboard agar tidak ada strip putih di bawah overlay */
+  background: #f8fafc;
   color: var(--foreground);
-  font-family: var(--font-geist-sans), -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-family: var(--font-jakarta-sans), -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   -webkit-font-smoothing: antialiased;
+}
+
+/* Halaman autentikasi harus putih sampai ke kanvas root. Safari iOS memakai
+   warna html/body ini untuk area di sekitar safe area dan saat rubber-band. */
+html:has(.auth-page),
+body:has(.auth-page) {
+  background: #ffffff;
+}
+
+/* Dashboard dan POS memakai scroller internal. Kunci document scroller agar
+   gesture pada halaman pendek tidak memicu rubber-band Safari. */
+html[data-app-shell-active],
+html[data-app-shell-active] body {
+  height: 100%;
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
+/* Body shell dibekukan sejak halaman dibuka, bukan baru ketika keyboard muncul.
+   Jadi buka/tutup keyboard tidak mengubah mode layout body dan tidak memicu
+   loncatan satu frame pada Safari. */
+html[data-app-shell-active] body {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+}
+
+/* Selama keyboard terbuka, `overflow: hidden` saja tidak cukup di iOS: Safari
+   tetap menggeser dokumen sendiri untuk mendekatkan kolom yang difokuskan, dan
+   elemen position:fixed (shell + dialog) ikut naik-turun mengikutinya.
+   Membekukan body menghilangkan ruang gerak itu, sehingga tampilan diam.
+   Hanya scroller form yang boleh bergerak melalui focusing steps browser. */
+/* Jangan biarkan scroll anchoring browser mengoreksi posisi berulang kali saat
+   keyboard berganti dari teks ke angka atau ketika nilai form disimpan. */
+html[data-app-shell-active] main,
+.app-shell :is(.overflow-y-auto, .overflow-auto),
+[data-keyboard-aware] :is(.overflow-y-auto, .overflow-auto),
+.app-overlay :is(.overflow-y-auto, .overflow-auto, .mobile-dialog-scroll) {
+  overflow-anchor: none;
+}
+
+input[type="date"],
+input[type="time"],
+input[type="datetime-local"] {
+  touch-action: manipulation;
+}
+
+/* Jika pengguna sendiri menyentuh kolom, biarkan focusing steps browser yang
+   menggulirkan—cukup beri ruang dari header/toolbar dan tepi keyboard. Jangan
+   ditambah scrollIntoView kedua dari JavaScript pada shell aplikasi. */
+.app-shell :is(input, textarea, select, [contenteditable="true"]),
+[data-keyboard-aware] :is(input, textarea, select, [contenteditable="true"]) {
+  scroll-margin-top: 7rem;
+  scroll-margin-bottom: 12rem;
+}
+
+/* Interaksi landing page dibuat terasa responsif tanpa memengaruhi dashboard. */
+.landing-page {
+  overflow-x: clip;
+}
+
+.landing-tap,
+.landing-icon-button,
+.landing-primary-button,
+.landing-secondary-button,
+.landing-mobile-link {
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
+.landing-tap,
+.landing-icon-button,
+.landing-primary-button,
+.landing-secondary-button {
+  transition-duration: 250ms;
+  transition-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.landing-primary-button:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 12px 30px -14px rgb(37 99 235 / 0.7);
+}
+
+.landing-secondary-button:hover {
+  transform: translateY(-2px);
+}
+
+.landing-icon-button:hover {
+  transform: rotate(-5deg) scale(1.05);
+}
+
+.landing-tap:active,
+.landing-icon-button:active,
+.landing-primary-button:active,
+.landing-secondary-button:active,
+.landing-mobile-link:active {
+  transform: scale(0.97);
+}
+
+.landing-nav-link {
+  position: relative;
+}
+
+.landing-nav-link::after {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: 2px;
+  border-radius: 999px;
+  background: #2563eb;
+  content: "";
+  transform: scaleX(0);
+  transform-origin: center;
+  transition: transform 250ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.landing-nav-link:hover::after,
+.landing-nav-link:focus-visible::after {
+  transform: scaleX(1);
+}
+
+.landing-reveal {
+  animation: landing-reveal 700ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.landing-reveal-1 { animation-delay: 60ms; }
+.landing-reveal-2 { animation-delay: 130ms; }
+.landing-reveal-3 { animation-delay: 200ms; }
+.landing-reveal-4 { animation-delay: 270ms; }
+.landing-reveal-5 { animation-delay: 340ms; }
+
+@keyframes landing-reveal {
+  from {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .landing-page *,
+  .landing-page *::before,
+  .landing-page *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* Gerakan ringan dan konsisten untuk POS + backoffice. Properti layout seperti
+   width/height tidak dianimasikan agar interaksi tetap lancar di HP kasir. */
+.app-motion-scope :where(button, a, [role="button"]) {
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+  transition-property: color, background-color, border-color, box-shadow, opacity, transform;
+  transition-duration: 160ms;
+  transition-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.app-motion-scope :where(button, a, [role="button"]):active:not(:disabled) {
+  transform: scale(0.985);
+}
+
+.app-motion-scope :where(button, a, input, select, textarea):focus-visible {
+  outline: 2px solid rgb(59 130 246 / 0.75);
+  outline-offset: 2px;
+}
+
+.pos-app :where(.overflow-y-auto, .overflow-auto),
+.backoffice-app main {
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: none;
+}
+
+.app-route-enter {
+  /* Safari dapat menahan keyframe opacity saat tab dimuat ulang atau tingkat
+     zoom berubah, sehingga konten ada di accessibility tree tetapi tidak
+     terlukis. Route utama harus selalu terlihat; animasi cukup dipakai pada
+     skeleton, modal, dan elemen kecil. */
+  opacity: 1;
+}
+
+.app-loading-enter {
+  animation: app-route-enter 280ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes app-route-enter {
+  from {
+    opacity: 0;
+    transform: translateY(5px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.app-overlay {
+  animation: app-overlay-fade 180ms ease-out both;
+}
+
+.app-overlay > .relative,
+.app-popover-enter {
+  animation: app-surface-enter 240ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.app-overlay.is-closing {
+  pointer-events: none;
+  animation: app-overlay-exit 180ms ease-in both;
+}
+
+.app-overlay.is-closing > .relative {
+  animation: app-surface-exit 220ms cubic-bezier(0.4, 0, 1, 1) both;
+}
+
+.app-toast-enter {
+  animation: app-toast-enter 320ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.app-notification-card {
+  opacity: 0;
+  animation: app-notification-enter 320ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes app-overlay-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes app-overlay-exit {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+
+@keyframes app-surface-enter {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes app-surface-exit {
+  from {
+    opacity: 1;
+    transform: none;
+  }
+  to {
+    opacity: 0;
+    transform: translateY(14px) scale(0.99);
+  }
+}
+
+.menu-panel-enter-forward {
+  animation: menu-panel-forward 240ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.menu-panel-enter-back {
+  animation: menu-panel-back 220ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes menu-panel-forward {
+  from { opacity: 0; transform: translateX(18px); }
+  to { opacity: 1; transform: none; }
+}
+
+@keyframes menu-panel-back {
+  from { opacity: 0; transform: translateX(-18px); }
+  to { opacity: 1; transform: none; }
+}
+
+@keyframes app-toast-enter {
+  from {
+    opacity: 0;
+    transform: translateY(14px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes app-notification-enter {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.navigation-progress {
+  opacity: 0;
+  pointer-events: none;
+  transform: scaleX(0);
+}
+
+.navigation-progress--active {
+  opacity: 1;
+  animation: navigation-progress 10s cubic-bezier(0.1, 0.7, 0.2, 1) forwards;
+}
+
+@keyframes navigation-progress {
+  0% { transform: scaleX(0); }
+  12% { transform: scaleX(0.32); }
+  55% { transform: scaleX(0.72); }
+  100% { transform: scaleX(0.94); }
+}
+
+.app-skeleton,
+.app-skeleton-dark {
+  position: relative;
+  overflow: hidden;
+  background: #e2e8f0;
+}
+
+.app-skeleton-dark {
+  background: #334155;
+}
+
+.app-skeleton::after,
+.app-skeleton-dark::after {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(100deg, transparent 20%, rgb(255 255 255 / 0.55) 45%, transparent 70%);
+  content: "";
+  transform: translateX(-100%);
+  animation: app-skeleton-shimmer 1.35s ease-in-out infinite;
+}
+
+.app-skeleton-dark::after {
+  background: linear-gradient(100deg, transparent 20%, rgb(255 255 255 / 0.12) 45%, transparent 70%);
+}
+
+@keyframes app-skeleton-shimmer {
+  to { transform: translateX(100%); }
+}
+
+.mobile-cart-sheet {
+  transition: transform 300ms cubic-bezier(0.22, 1, 0.36, 1), visibility 0s linear 0s;
+}
+
+.mobile-cart-sheet.is-closed {
+  visibility: hidden;
+  transition: transform 300ms cubic-bezier(0.22, 1, 0.36, 1), visibility 0s linear 300ms;
+}
+
+@media (min-width: 768px) {
+  .mobile-cart-sheet.is-closed {
+    visibility: visible;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .app-motion-scope *,
+  .app-motion-scope *::before,
+  .app-motion-scope *::after,
+  .app-overlay,
+  .app-overlay *,
+  .app-route-enter,
+  .app-loading-enter,
+  .app-popover-enter,
+  .app-toast-enter,
+  .app-notification-card,
+  .navigation-progress,
+  .app-skeleton::after,
+  .app-skeleton-dark::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* Scroller utama dashboard: momentum scroll iOS + jangan teruskan pantulan ke
+   halaman, supaya gerakannya terasa mulus dan tidak "mental" di ujung. */
+main {
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-y: contain;
+}
+
+/* Desktop memakai alur dokumen normal. `position: fixed` pada shell atau body
+   dapat membuat Safari membuang compositing layer halaman ketika page zoom
+   berubah, yang terlihat sebagai layar putih walau DOM masih lengkap. */
+.app-shell {
+  width: 100%;
+  height: 100dvh;
+  min-height: 0;
+}
+
+/* Dialog tetap setinggi layar ketika keyboard membuka supaya form tidak
+   berantakan saat keyboard ditutup kembali. */
+.app-overlay {
+  position: fixed;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: var(--app-height, 100dvh);
+}
+
+/* Saat drawer/dialog layar penuh terbuka, jangan teruskan gesture scroll ke
+   halaman di belakangnya. Dashboard memiliki scroller <main> sendiri. */
+html:has(:is(.fixed.inset-0, .app-overlay):not(.pointer-events-none)),
+body:has(:is(.fixed.inset-0, .app-overlay):not(.pointer-events-none)) {
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
+main:has(:is(.fixed.inset-0, .app-overlay):not(.pointer-events-none)) {
+  overflow-y: hidden;
+}
+
+:is(.fixed.inset-0, .app-overlay):not(.pointer-events-none) :is(.overflow-y-auto, .overflow-auto) {
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Pada HP, dialog dan panel POS tetap stabil. Isi form yang bergulir memberi
+   ruang untuk keyboard agar kolom aktif tetap dapat dijangkau. */
+@media (max-width: 767px) {
+  /* Dialog mobile mengikuti visual viewport Safari, bukan layout viewport yang
+     dapat memanjang ke belakang address bar / toolbar bawah. */
+  .app-overlay {
+    top: var(--app-viewport-top, 0px);
+    height: var(--app-visible-height, 100dvh);
+    align-items: flex-end !important;
+    justify-content: center !important;
+    padding: 0 !important;
+  }
+
+  /* Dialog lama yang masih memakai fixed inset-0 mendapat perilaku yang sama.
+     :has membatasi aturan ini hanya pada overlay yang mempunyai backdrop dan
+     panel, sehingga sidebar serta toast tidak ikut berubah menjadi sheet. */
+  .fixed.inset-0:not(.pointer-events-none):has(> .absolute.inset-0):has(> .relative) {
+    top: var(--app-viewport-top, 0px);
+    bottom: auto;
+    height: var(--app-visible-height, 100dvh);
+    min-height: 0;
+    align-items: flex-end !important;
+    justify-content: center !important;
+    padding: 0 !important;
+    overflow: hidden;
+    animation: app-overlay-fade 180ms ease-out both;
+  }
+
+  :is(.app-overlay, .fixed.inset-0:not(.pointer-events-none):has(> .absolute.inset-0):has(> .relative)) > .relative,
+  .mobile-fullscreen-dialog .mobile-dialog-panel {
+    width: 100%;
+    height: auto;
+    max-width: none;
+    /* Sisa ruang di atas sheet dipangkas (dulu 10% layar) supaya isi form dapat
+       ruang paling besar di HP. Aturan ini berlaku untuk semua dialog. */
+    max-height: min(calc(100% - 1.5rem), 48rem) !important;
+    border-right: 0;
+    border-bottom: 0;
+    border-left: 0;
+    border-radius: 1.75rem 1.75rem 0 0;
+    animation: app-surface-enter 240ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+
+  /* Baris tombol dialog diseragamkan di HP: sejajar (bukan bertumpuk) supaya
+     tidak memakan tinggi, dan menghormati area home indicator iPhone.
+     Ditulis di sini agar berlaku untuk semua dialog tanpa menyentuh tiap file. */
+  :is(.app-overlay, .fixed.inset-0:not(.pointer-events-none):has(> .absolute.inset-0):has(> .relative)) :is(.dialog-actions, .mobile-dialog-actions) {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.75rem;
+    padding-bottom: max(0.75rem, env(safe-area-inset-bottom));
+  }
+
+  /* Dialog dengan satu tombol saja tetap melebar penuh. */
+  :is(.app-overlay, .fixed.inset-0:not(.pointer-events-none):has(> .absolute.inset-0):has(> .relative)) :is(.dialog-actions, .mobile-dialog-actions):has(> :only-child) {
+    grid-template-columns: 1fr;
+  }
+
+  .mobile-fullscreen-dialog .mobile-dialog-scroll {
+    min-height: 0;
+    flex: 1 1 auto;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .mobile-fullscreen-dialog .mobile-dialog-actions {
+    flex: none;
+    padding-bottom: max(0.75rem, env(safe-area-inset-bottom));
+  }
+
+  /* Di dalam shell aplikasi, dialog memakai tinggi layar (--app-height) dan
+     tidak ikut menyusut saat keyboard muncul. Keyboard menimpa bagian bawah
+     dialog; isi form yang bergulir sendiri yang digeser agar kolom aktif tetap
+     terlihat. Tanpa ini dialog ikut naik dan isinya terlihat terpotong.
+     .app-overlay ikut disebut karena tidak tercakup .fixed.inset-0. */
+  body:has([data-app-shell], [data-keyboard-aware]) :is(.fixed.inset-0:not(.pointer-events-none), .app-overlay) {
+    top: 0;
+    bottom: auto;
+    height: var(--app-height, 100dvh);
+    min-height: 0;
+  }
+
+  body:has([data-app-shell], [data-keyboard-aware]) :is(.fixed.inset-0:not(.pointer-events-none), .app-overlay) > .relative {
+    max-height: calc(var(--app-height, 100dvh) - 1.5rem);
+  }
+
+  .mobile-cart-scroll {
+    overscroll-behavior: contain;
+    scroll-padding-bottom: 1rem;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* Jangan pindahkan seluruh keranjang ketika keyboard terbuka. Tambahkan
+     ruang di akhir scroller supaya kolom bagian bawah dapat digulir ke atas
+     keyboard, mengikuti perilaku form di dashboard Pantau. */
+  html[data-keyboard-open] .mobile-cart-scroll {
+    padding-bottom: calc(
+      max(0px, calc(var(--app-height, 100dvh) - var(--app-viewport-top, 0px) - var(--app-visible-height, 100dvh)))
+      + 1rem
+    );
+    scroll-padding-bottom: calc(
+      max(0px, calc(var(--app-height, 100dvh) - var(--app-viewport-top, 0px) - var(--app-visible-height, 100dvh)))
+      + 1rem
+    );
+  }
+}
+
+/* Hanya iPhone/perangkat sentuh kecil yang perlu shell fixed agar keyboard
+   menimpa halaman tanpa mengubah layout. Browser desktop yang dipersempit atau
+   di-zoom tetap menggunakan layout normal di atas. */
+@media (max-width: 767px) and (pointer: coarse) {
+  .app-shell {
+    position: fixed;
+    inset: 0;
+    height: var(--app-height, 100dvh);
+  }
 }
 
 .scrollbar-hide {
@@ -37,4 +586,74 @@ body {
 }
 .scrollbar-hide::-webkit-scrollbar {
   display: none;
+}
+
+/* Safari iPhone memperbesar halaman saat fokus ke kolom dengan teks < 16px. */
+@media (max-width: 767px) and (pointer: coarse) {
+  input:is(
+    :not([type]),
+    [type="text"],
+    [type="email"],
+    [type="password"],
+    [type="search"],
+    [type="number"],
+    [type="tel"],
+    [type="url"],
+    [type="date"],
+    [type="datetime-local"],
+    [type="time"],
+    [type="month"],
+    [type="week"]
+  ),
+  select,
+  textarea {
+    font-size: 16px !important;
+  }
+}
+
+/* Cetak browser POS: sembunyikan aplikasi dan sisakan struk selebar kertas 58 mm. */
+@media print {
+  @page {
+    margin: 0;
+  }
+
+  html,
+  body {
+    width: 58mm;
+    min-width: 58mm;
+    margin: 0 !important;
+    background: #fff !important;
+  }
+
+  body * {
+    visibility: hidden !important;
+  }
+
+  #receipt-content,
+  #receipt-content * {
+    visibility: visible !important;
+  }
+
+  #receipt-content {
+    position: fixed !important;
+    inset: 0 auto auto 0 !important;
+    width: 58mm !important;
+    max-height: none !important;
+    margin: 0 !important;
+    padding: 3mm !important;
+    overflow: visible !important;
+    background: #fff !important;
+    color: #000 !important;
+  }
+
+  #receipt-content * {
+    color: #000 !important;
+    box-shadow: none !important;
+  }
+}
+/* Gunakan tombol mata aplikasi tanpa ikon password-manager Safari yang menumpuk. */
+.password-with-toggle::-webkit-credentials-auto-fill-button {
+  visibility: hidden;
+  display: none !important;
+  pointer-events: none;
 }

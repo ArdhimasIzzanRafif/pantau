@@ -1,0 +1,40 @@
+/* Override the general dialog alignment only for the customer menu sheets. */
+@media (max-width: 767px) {
+  .overlay.overlay {
+    flex-direction: row;
+    align-items: flex-end !important;
+    justify-content: center !important;
+    padding: 0 !important;
+    bottom: auto;
+    overflow: hidden;
+  }
+
+  .overlay.overlay > .panel.panel {
+    width: 100%;
+    min-height: 0;
+    max-height: calc(100% - 12px) !important;
+    margin: 0;
+    border-radius: 24px 24px 0 0;
+    overflow: hidden;
+    box-shadow: 0 -8px 32px rgb(15 23 42 / 12%);
+  }
+
+  .overlay.overlay > .cartPanel.cartPanel {
+    height: calc(100% - 12px);
+  }
+
+  .panel input,
+  .panel textarea {
+    font-size: 16px;
+  }
+
+  .footer {
+    padding: 12px 20px max(12px, env(safe-area-inset-bottom));
+  }
+
+  .footer button {
+    min-height: 52px;
+    border-radius: 14px;
+    box-shadow: none;
+  }
+}

@@ -1,10 +1,12 @@
 "use client"
 
 import Link from "next/link"
-import { usePathname, useRouter } from "next/navigation"
+import { usePathname } from "next/navigation"
 import { useState, useEffect } from "react"
 import { signOut } from "next-auth/react"
-import { Building2, Inbox, ChevronRight, LogOut, Shield } from "lucide-react"
+import { Building2, Inbox, ChevronRight, LogOut } from "lucide-react"
+import { useViewportHeight } from "@/components/use-viewport-height"
+import { PantauLogo } from "@/components/pantau-logo"
 
 const navItems = [
   { href: "/admin/businesses", label: "Businesses", icon: Building2, exact: false },
@@ -12,8 +14,8 @@ const navItems = [
 ]
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
+  useViewportHeight({ resetWindowScroll: false })
   const pathname = usePathname()
-  const router = useRouter()
   const [menuOpen, setMenuOpen] = useState(false)
   const [trialCount, setTrialCount] = useState(0)
 
@@ -24,20 +26,17 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   }, [])
 
   async function handleSignOut() {
-    await signOut({ redirect: false })
-    router.push("/login")
+    await signOut({ redirect: false }); window.location.href = "/login"
   }
 
   return (
-    <div className="min-h-screen flex bg-slate-50">
+    <div data-keyboard-aware className="min-h-screen flex bg-slate-50">
       {/* Sidebar — same as dashboard */}
       <aside className="w-56 shrink-0 flex flex-col bg-slate-950 fixed top-0 left-0 h-full z-30">
         {/* Logo */}
         <div className="h-16 flex items-center px-5 border-b border-white/8 shrink-0">
           <Link href="/admin" className="flex items-center gap-2.5">
-            <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center shrink-0">
-              <Shield className="w-4 h-4 text-white" />
-            </div>
+            <PantauLogo className="h-8 w-8" priority />
             <div>
               <div className="text-sm font-bold text-white tracking-tight">Pantau Admin</div>
               <div className="text-[10px] text-slate-500 font-medium">Platform Control</div>

@@ -2,6 +2,7 @@ import { prisma } from "@/lib/db"
 import { requireAdmin } from "@/lib/admin-auth"
 import { isResponse, ok } from "@/lib/api-helpers"
 import { NextResponse } from "next/server"
+import { deleteOrganizationData } from "@/lib/delete-organization"
 
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -41,14 +42,13 @@ export async function DELETE(_req: Request, { params }: { params: Promise<{ id: 
 
   const { id } = await params
 
-  // Semua relasi pakai onDelete: Cascade, cukup hapus org-nya saja
-  // Tapi user harus dihapus manual karena user bisa lintas org
+  // Simpan daftar user lebih dulu; user dapat menjadi anggota organisasi lain.
   const orgUsers = await prisma.organizationUser.findMany({
     where: { organizationId: id },
     select: { userId: true },
   })
 
-  await prisma.organization.delete({ where: { id } })
+  await deleteOrganizationData(prisma, id)
 
   // Hapus user yang tidak punya org lain
   for (const { userId } of orgUsers) {

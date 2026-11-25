@@ -77,7 +77,10 @@ export default function HealthPage() {
     setOrgs(data); setLoading(false); setRefreshing(false)
   }
 
-  useEffect(() => { load() }, [])
+  useEffect(() => {
+    const timeoutId = window.setTimeout(() => { void load() }, 0)
+    return () => window.clearTimeout(timeoutId)
+  }, [])
 
   if (loading) return (
     <div className="flex items-center justify-center min-h-screen">

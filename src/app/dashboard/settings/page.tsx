@@ -1,16 +1,40 @@
 "use client"
 
 import { useState, useEffect, useRef, useCallback } from "react"
-import { useSession } from "next-auth/react"
-import { Building2, Save, Loader2, CheckCircle, Lock, QrCode, Upload, Trash2, X, Download, Eye, FileText, Wifi, Camera, ChevronDown, Plus, Power } from "lucide-react"
-import jsQR from "jsqr"
+import { useSession, signOut } from "next-auth/react"
+import { Building2, Save, Loader2, CheckCircle, Lock, QrCode, Upload, Trash2, X, Download, Eye, FileText, Wifi, Camera, ChevronDown, Plus, Power, UserRound } from "lucide-react"
 import QRCode from "qrcode"
+import { useConfirm } from "@/components/ui/use-confirm"
+import { WhatsAppIntegrationSettings } from "@/components/whatsapp-integration-settings"
+
+const PLAN_META: Record<string, { name: string; price: string; desc: string; rank: number }> = {
+  STARTER: { name: "Kasir",       price: "Rp 199.000", desc: "Kasir, shift, dan transaksi",     rank: 1 },
+  PRO:     { name: "Operasional", price: "Rp 499.000", desc: "Kasir + stok & gudang lengkap",  rank: 2 },
+}
+const PLAN_ORDER = ["STARTER", "PRO"] as const
+const CONFIGURED_APP_URL = (process.env.NEXT_PUBLIC_APP_URL ?? "").replace(/\/$/, "")
+
+function publicAppUrl() {
+  const currentHost = window.location.hostname
+  const dashboardOpenedFromNetwork = currentHost !== "localhost" && currentHost !== "127.0.0.1"
+  return dashboardOpenedFromNetwork ? window.location.origin : CONFIGURED_APP_URL || window.location.origin
+}
+
+function menuUrl(token: string, tableToken?: string) {
+  const tableQuery = tableToken ? `?meja=${encodeURIComponent(tableToken)}` : ""
+  return `${publicAppUrl()}/t/${encodeURIComponent(token)}${tableQuery}`
+}
 
 export default function SettingsPage() {
+  const { ask, dialog } = useConfirm()
   const { data: session } = useSession()
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
   const [form, setForm] = useState({ businessName: "", email: "", name: "" })
+  const [profileImage, setProfileImage] = useState<string | null>(null)
+  const [profileUploading, setProfileUploading] = useState(false)
+  const [profileError, setProfileError] = useState("")
+  const profileInputRef = useRef<HTMLInputElement>(null)
 
 
   const [receiptLogo, setReceiptLogo]       = useState<string | null>(null)
@@ -43,29 +67,111 @@ export default function SettingsPage() {
   const [tableQrModal, setTableQrModal] = useState<{ loc: LocationRow; table: TableRow } | null>(null)
   const [tableQrDataUrl, setTableQrDataUrl] = useState<Record<string, string>>({})
 
+  const [plan, setPlan] = useState<string>("")
+  const [planModal, setPlanModal] = useState(false)
+  const [planSaving, setPlanSaving] = useState<string | null>(null)
+  const [planChangedTo, setPlanChangedTo] = useState<string | null>(null)
+
   const role = (session?.user as { role?: string })?.role ?? ""
   const isOwner = role === "OWNER"
+  // QR meja disiapkan juga oleh Supervisor dan Admin Gudang, sesuai izin yang
+  // sama di server (src/app/api/tables).
+  const canManageTables = ["OWNER", "SUPERVISOR", "ADMIN_GUDANG"].includes(role ?? "")
 
   const roleLabel: Record<string, string> = {
     OWNER: "Owner",
     ADMIN_GUDANG: "Admin Gudang",
     SUPERVISOR: "Supervisor",
-    EMPLOYEE: "Karyawan",
   }
 
   const generateQr = useCallback(async (token: string) => {
     if (qrDataUrl[token]) return
-    const url = `${window.location.origin}/t/${token}`
+    const url = menuUrl(token)
     const dataUrl = await QRCode.toDataURL(url, { width: 400, margin: 2, color: { dark: "#0F172A", light: "#FFFFFF" } })
     setQrDataUrl((prev) => ({ ...prev, [token]: dataUrl }))
   }, [qrDataUrl])
 
   const generateTableQr = useCallback(async (loc: LocationRow, table: TableRow) => {
     if (tableQrDataUrl[table.tableToken]) return
-    const url = `${window.location.origin}/t/${loc.menuToken}?meja=${table.tableToken}`
+    const url = menuUrl(loc.menuToken, table.tableToken)
     const dataUrl = await QRCode.toDataURL(url, { width: 400, margin: 2, color: { dark: "#0F172A", light: "#FFFFFF" } })
     setTableQrDataUrl((prev) => ({ ...prev, [table.tableToken]: dataUrl }))
   }, [tableQrDataUrl])
+
+  async function handleProfilePhoto(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setProfileError("")
+    if (!["image/png", "image/jpeg", "image/webp"].includes(file.type)) {
+      setProfileError("Format foto harus JPG, PNG, atau WebP")
+      e.target.value = ""
+      return
+    }
+    if (file.size > 2 * 1024 * 1024) {
+      setProfileError("Ukuran foto maksimal 2MB")
+      e.target.value = ""
+      return
+    }
+    setProfileUploading(true)
+    try {
+      const fd = new FormData()
+      fd.append("file", file)
+      fd.append("folder", "profile")
+      const up = await fetch("/api/upload", { method: "POST", body: fd })
+      const uploadResult = await up.json().catch(() => ({})) as { url?: string; error?: string }
+      if (!up.ok || !uploadResult.url) throw new Error(uploadResult.error ?? "Upload foto gagal")
+
+      const save = await fetch("/api/organization", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ image: uploadResult.url }),
+      })
+      const saveResult = await save.json().catch(() => ({})) as { error?: string }
+      if (!save.ok) throw new Error(saveResult.error ?? "Foto gagal disimpan")
+
+      setProfileImage(uploadResult.url)
+      window.dispatchEvent(new CustomEvent("profile-image-updated", { detail: uploadResult.url }))
+    } catch (uploadError) {
+      setProfileError(uploadError instanceof Error ? uploadError.message : "Upload foto gagal")
+    } finally {
+      setProfileUploading(false)
+      if (profileInputRef.current) profileInputRef.current.value = ""
+    }
+  }
+
+  async function removeProfilePhoto() {
+    setProfileError("")
+    const response = await fetch("/api/organization", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ image: null }),
+    })
+    if (response.ok) {
+      setProfileImage(null)
+      window.dispatchEvent(new CustomEvent("profile-image-updated", { detail: null }))
+    } else {
+      const result = await response.json().catch(() => ({})) as { error?: string }
+      setProfileError(result.error ?? "Foto gagal dihapus")
+    }
+  }
+
+  async function changePlan(newPlan: string) {
+    if (newPlan === plan) { setPlanModal(false); return }
+    setPlanSaving(newPlan)
+    const res = await fetch("/api/organization", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ plan: newPlan }),
+    })
+    setPlanSaving(null)
+    if (res.ok) {
+      setPlan(newPlan)
+      // Plan/menu tersimpan di sesi login. Sesi JWT tidak bisa di-refresh dari
+      // DB tanpa login ulang (auth.config.ts jalan di Edge, tanpa akses DB),
+      // jadi user perlu masuk ulang agar menu sesuai paket baru.
+      setPlanChangedTo(newPlan)
+    }
+  }
 
   function downloadTableQr(loc: LocationRow, table: TableRow) {
     const url = tableQrDataUrl[table.tableToken]
@@ -115,39 +221,53 @@ export default function SettingsPage() {
     }
   }
 
-  async function deleteTable(loc: LocationRow, table: TableRow) {
-    if (!confirm(`Hapus meja "${table.name}"?`)) return
-    const res = await fetch(`/api/tables/${table.id}`, { method: "DELETE" })
-    if (res.ok) {
-      setTables((prev) => ({ ...prev, [loc.id]: prev[loc.id].filter((t) => t.id !== table.id) }))
-    }
+  function deleteTable(loc: LocationRow, table: TableRow) {
+    ask({
+      title: "Hapus meja ini?",
+      message: `QR untuk meja "${table.name}" tidak akan bisa dipakai lagi.`,
+      confirmLabel: "Hapus",
+      danger: true,
+      onConfirm: async () => {
+        const res = await fetch(`/api/tables/${table.id}`, { method: "DELETE" })
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({})) as { error?: string }
+          throw new Error(body.error ?? "Gagal menghapus meja")
+        }
+        setTables((prev) => ({ ...prev, [loc.id]: prev[loc.id].filter((t) => t.id !== table.id) }))
+      },
+    })
   }
 
   useEffect(() => {
-    if (session?.user) {
-      setForm({
-        businessName: (session.user as { businessName?: string }).businessName ?? "",
-        email: session.user.email ?? "",
-        name: session.user.name ?? "",
+    const timeoutId = window.setTimeout(() => {
+      if (session?.user) {
+        setForm({
+          businessName: (session.user as { businessName?: string }).businessName ?? "",
+          email: session.user.email ?? "",
+          name: session.user.name ?? "",
+        })
+      }
+      fetch("/api/organization").then((r) => r.ok ? r.json() : null).then((d) => {
+        if (!d) return
+        setForm((prev) => ({
+          ...prev,
+          businessName: d.businessName ?? prev.businessName,
+          name: d.userName ?? prev.name,
+        }))
+        if (d.qrisImageUrl) setQrisUrl(d.qrisImageUrl)
+        setQrisPayloadSaved(!!d.qrisPayload)
+        setReceiptLogo(d.receiptLogoUrl ?? null)
+        setReceiptWifiName(d.receiptWifiName ?? "")
+        setReceiptWifiPassword(d.receiptWifiPassword ?? "")
+        setReceiptFooter(d.receiptFooterText ?? "")
+        setProfileImage(d.userImage ?? null)
+        if (d.plan) setPlan(d.plan)
       })
-    }
-    fetch("/api/organization").then((r) => r.ok ? r.json() : null).then((d) => {
-      if (!d) return
-      setForm((prev) => ({
-        ...prev,
-        businessName: d.businessName ?? prev.businessName,
-        name: d.userName ?? prev.name,
-      }))
-      if (d.qrisImageUrl) setQrisUrl(d.qrisImageUrl)
-      setQrisPayloadSaved(!!d.qrisPayload)
-      if (d.receiptLogoUrl) setReceiptLogo(d.receiptLogoUrl)
-      if (d.receiptWifiName) setReceiptWifiName(d.receiptWifiName)
-      if (d.receiptWifiPassword) setReceiptWifiPassword(d.receiptWifiPassword)
-      if (d.receiptFooterText) setReceiptFooter(d.receiptFooterText)
-    })
-    fetch("/api/locations?type=OUTLET").then((r) => r.ok ? r.json() : null).then((d) => {
-      if (Array.isArray(d)) setLocations(d)
-    })
+      fetch("/api/locations?type=OUTLET").then((r) => r.ok ? r.json() : null).then((d) => {
+        if (Array.isArray(d)) setLocations(d)
+      })
+    }, 0)
+    return () => window.clearTimeout(timeoutId)
   }, [session])
 
   async function handleSave(e: React.FormEvent) {
@@ -178,7 +298,7 @@ export default function SettingsPage() {
     setReceiptLogoUploading(true)
     const fd = new FormData()
     fd.append("file", file)
-    fd.append("folder", "menu")
+    fd.append("folder", "receipts")
     const res = await fetch("/api/upload", { method: "POST", body: fd })
     if (res.ok) {
       const data = await res.json()
@@ -210,71 +330,28 @@ export default function SettingsPage() {
     const file = e.target.files?.[0]
     if (!file) return
     setQrisError("")
+    setQrisSuccess(false)
     if (!["image/png", "image/jpeg", "image/jpg", "image/webp"].includes(file.type)) {
       setQrisError("Format file harus PNG, JPG, atau WEBP")
+      e.target.value = ""
       return
     }
-    if (file.size > 10 * 1024 * 1024) {
-      setQrisError("Ukuran file maksimal 10MB")
+    if (file.size > 5 * 1024 * 1024) {
+      setQrisError("Ukuran file maksimal 5MB")
+      e.target.value = ""
       return
     }
     setQrisUploading(true)
     try {
-      // Baca file sebagai data URL
-      const rawDataUrl = await new Promise<string>((resolve, reject) => {
-        const reader = new FileReader()
-        reader.onload = () => resolve(reader.result as string)
-        reader.onerror = reject
-        reader.readAsDataURL(file)
-      })
-      // Compress + decode QR payload dari canvas
-      const { compressed, qrisPayload } = await new Promise<{ compressed: string; qrisPayload: string | null }>((resolve, reject) => {
-        const img = new Image()
-        img.onload = () => {
-          try {
-            // Decode QR payload dari gambar full-resolution
-            const decodeCanvas = document.createElement("canvas")
-            decodeCanvas.width = img.naturalWidth
-            decodeCanvas.height = img.naturalHeight
-            const decodeCtx = decodeCanvas.getContext("2d")
-            let payload: string | null = null
-            if (decodeCtx) {
-              decodeCtx.drawImage(img, 0, 0)
-              const imageData = decodeCtx.getImageData(0, 0, decodeCanvas.width, decodeCanvas.height)
-              const decoded = jsQR(imageData.data, decodeCanvas.width, decodeCanvas.height)
-              payload = decoded?.data ?? null
-            }
-
-            // Compress untuk storage (480px JPEG 70%)
-            const MAX = 480
-            const scale = Math.min(MAX / img.width, MAX / img.height, 1)
-            const canvas = document.createElement("canvas")
-            canvas.width  = Math.max(1, Math.round(img.width  * scale))
-            canvas.height = Math.max(1, Math.round(img.height * scale))
-            const ctx = canvas.getContext("2d")
-            if (!ctx) { reject(new Error("Browser tidak support canvas, coba browser lain")); return }
-            ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
-            const result = canvas.toDataURL("image/jpeg", 0.70)
-            if (!result || result === "data:,") { reject(new Error("Gagal mengompresi gambar")); return }
-            resolve({ compressed: result, qrisPayload: payload })
-          } catch (err) {
-            reject(err)
-          }
-        }
-        img.onerror = () => reject(new Error("Gagal memuat gambar"))
-        img.src = rawDataUrl
-      })
-      // Kirim sebagai JSON — tidak ada multipart, tidak bisa hang
-      const res = await fetch("/api/organization", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ qrisImageUrl: compressed, qrisPayload }),
-      })
+      const formData = new FormData()
+      formData.append("file", file)
+      const res = await fetch("/api/upload/qris", { method: "POST", body: formData })
       let data: { error?: string } = {}
-      try { data = await res.json() } catch { /* empty body — lihat status */ }
+      try { data = await res.json() } catch { /* respons kosong */ }
       if (res.ok) {
-        setQrisUrl(compressed)
-        setQrisPayloadSaved(!!qrisPayload)
+        const uploaded = data as { url?: string }
+        setQrisUrl(uploaded.url ?? null)
+        setQrisPayloadSaved(true)
         setQrisSuccess(true)
         setTimeout(() => setQrisSuccess(false), 3000)
       } else {
@@ -287,14 +364,29 @@ export default function SettingsPage() {
     if (qrisInputRef.current) qrisInputRef.current.value = ""
   }
 
-  async function handleQrisDelete() {
-    if (!confirm("Hapus gambar QRIS?")) return
-    await fetch("/api/organization", {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ qrisImageUrl: null }),
+  function handleQrisDelete() {
+    ask({
+      title: "Hapus gambar QRIS?",
+      message: "Pembeli tidak akan bisa membayar lewat QRIS sampai gambar baru diunggah.",
+      confirmLabel: "Hapus",
+      danger: true,
+      onConfirm: runQrisDelete,
     })
-    setQrisUrl(null)
+  }
+
+  async function runQrisDelete() {
+    setQrisError("")
+    const response = await fetch("/api/upload/qris", { method: "DELETE" })
+    if (response.ok) {
+      setQrisUrl(null)
+      setQrisPayloadSaved(false)
+      setQrisSuccess(false)
+    } else {
+      const body = await response.json().catch(() => ({}))
+      const message = body.error ?? "Gagal menghapus QRIS"
+      setQrisError(message)
+      throw new Error(message)
+    }
   }
 
   function downloadQr(token: string, name: string) {
@@ -308,14 +400,14 @@ export default function SettingsPage() {
 
 
   const inputClass = (editable: boolean) =>
-    `w-full px-4 py-2.5 rounded-xl border border-slate-200 text-sm transition ${
+    `w-full min-h-11 px-4 py-2.5 rounded-xl border border-slate-200 text-sm transition ${
       editable
         ? "text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
         : "text-slate-500 bg-slate-50 cursor-not-allowed"
     }`
 
   return (
-    <div className="max-w-2xl mx-auto space-y-6">
+    <div className="mx-auto w-full max-w-5xl space-y-5 sm:space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
           <h1 className="text-2xl font-light text-slate-900 tracking-tight">Pengaturan</h1>
@@ -329,19 +421,71 @@ export default function SettingsPage() {
         )}
       </div>
 
-      <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
-        <div className="px-6 py-4 border-b border-slate-100 flex items-center gap-3">
-          <div className="w-8 h-8 bg-blue-100 rounded-lg flex items-center justify-center">
+      <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+        <div className="flex items-center gap-3 border-b border-slate-100 px-4 py-4 sm:px-6">
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-blue-100">
             <Building2 className="w-4 h-4 text-blue-600" />
           </div>
-          <div>
+          <div className="min-w-0">
             <div className="font-semibold text-slate-900 text-sm">Informasi Bisnis</div>
             <div className="text-xs text-slate-400">
               {isOwner ? "Kelola detail organisasi Anda" : "Detail organisasi tempat Anda bergabung"}
             </div>
           </div>
         </div>
-        <form onSubmit={handleSave} className="px-6 py-5 space-y-4">
+        <form onSubmit={handleSave} className="space-y-4 p-4 sm:p-6">
+          <p className="text-sm font-semibold text-slate-800">Foto profil</p>
+          {/* Foto Profil */}
+          <div className="flex items-center gap-4">
+            {profileImage ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={profileImage}
+                alt="Foto profil"
+                onError={() => {
+                  setProfileImage(null)
+                  setProfileError("Foto tidak dapat dimuat. Silakan upload ulang.")
+                }}
+                className="h-16 w-16 shrink-0 rounded-full border border-slate-200 object-cover"
+              />
+            ) : (
+              <div className="w-16 h-16 rounded-full bg-slate-200 flex items-center justify-center text-slate-500 shrink-0">
+                <UserRound className="w-7 h-7" />
+              </div>
+            )}
+            <div className="min-w-0 flex-1 space-y-1.5">
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => profileInputRef.current?.click()}
+                  disabled={profileUploading}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-blue-600 border border-blue-200 hover:bg-blue-50 disabled:opacity-60 rounded-full transition-colors"
+                >
+                  {profileUploading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Camera className="w-3.5 h-3.5" />}
+                  {profileUploading ? "Mengupload..." : profileImage ? "Ganti Foto" : "Upload Foto"}
+                </button>
+                {profileImage && (
+                  <button
+                    type="button"
+                    onClick={removeProfilePhoto}
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-red-600 border border-red-200 hover:bg-red-50 rounded-full transition-colors"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" /> Hapus
+                  </button>
+                )}
+              </div>
+              <span className="block text-xs text-slate-400">JPG, PNG, atau WebP · Maks 2MB</span>
+              {profileError && <span className="block text-xs text-red-600">{profileError}</span>}
+            </div>
+            <input
+              ref={profileInputRef}
+              type="file"
+              accept="image/png,image/jpeg,image/jpg,image/webp"
+              className="hidden"
+              onChange={handleProfilePhoto}
+            />
+          </div>
+
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-1.5">Nama Bisnis</label>
             <input
@@ -354,7 +498,7 @@ export default function SettingsPage() {
             />
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-1.5">Nama Lengkap</label>
               <input
@@ -390,7 +534,7 @@ export default function SettingsPage() {
               <button
                 type="submit"
                 disabled={saving}
-                className="flex items-center gap-2 px-5 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white text-sm font-semibold rounded-full transition-colors"
+                className="flex w-full items-center justify-center gap-2 rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-blue-700 disabled:opacity-60 sm:w-auto sm:rounded-full"
               >
                 {saving ? (
                   <><Loader2 className="w-4 h-4 animate-spin" /> Menyimpan...</>
@@ -405,137 +549,138 @@ export default function SettingsPage() {
         </form>
       </div>
 
-      {/* QRIS */}
-      <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
-        <div className="px-6 py-4 border-b border-slate-100 flex items-center gap-3">
-          <div className="w-8 h-8 bg-emerald-100 rounded-lg flex items-center justify-center">
-            <QrCode className="w-4 h-4 text-emerald-600" />
-          </div>
-          <div>
-            <div className="font-semibold text-slate-900 text-sm">QRIS Pembayaran</div>
-            <div className="text-xs text-slate-400">QR code yang ditampilkan kasir saat pembayaran QRIS</div>
-          </div>
-        </div>
-        <div className="px-6 py-5">
-          {qrisError && (
-            <div className="mb-4 text-sm text-red-600 bg-red-50 border border-red-200 px-4 py-3 rounded-xl">{qrisError}</div>
-          )}
-          {qrisSuccess && (
-            <div className="mb-4 text-sm text-emerald-700 bg-emerald-50 border border-emerald-200 px-4 py-3 rounded-xl flex items-center gap-2">
-              <CheckCircle className="w-4 h-4" />
-              {qrisPayloadSaved
-                ? "QRIS Dinamis aktif — nominal otomatis masuk ke QR saat transaksi"
-                : "QRIS terupload, tapi QR tidak terbaca — pelanggan perlu input nominal manual"}
+      {/* QRIS hanya untuk Owner. Role lain tidak mengurus pembayaran, dan
+          sebelumnya blok ini tetap tampil meski isinya tidak bisa diapa-apakan. */}
+      {isOwner && (
+        <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+          <div className="flex items-center gap-3 border-b border-slate-100 px-4 py-4 sm:px-6">
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-emerald-100">
+              <QrCode className="w-4 h-4 text-emerald-600" />
             </div>
-          )}
+            <div className="min-w-0">
+              <div className="font-semibold text-slate-900 text-sm">QRIS Pembayaran</div>
+              <div className="text-xs text-slate-400">QR code yang ditampilkan kasir saat pembayaran QRIS</div>
+            </div>
+          </div>
+          <div className="p-4 sm:p-6">
+            {qrisError && (
+              <div className="mb-4 text-sm text-red-600 bg-red-50 border border-red-200 px-4 py-3 rounded-xl">{qrisError}</div>
+            )}
+            {qrisSuccess && (
+              <div className="mb-4 text-sm text-emerald-700 bg-emerald-50 border border-emerald-200 px-4 py-3 rounded-xl flex items-center gap-2">
+                <CheckCircle className="w-4 h-4" />
+                QRIS berhasil diverifikasi dan disimpan.
+              </div>
+            )}
 
-          <div className="flex flex-col sm:flex-row sm:items-start gap-4 sm:gap-6">
-            {/* Preview */}
-            <div className="shrink-0">
-              {qrisUrl ? (
-                <div className="flex flex-col items-center gap-2">
-                  <div className="w-36 h-36 rounded-2xl overflow-hidden border-2 border-slate-200 bg-white relative">
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={qrisUrl} alt="QRIS" className="w-full h-full object-contain p-1" />
+            <div className="grid grid-cols-1 gap-5 lg:grid-cols-[9rem_minmax(0,1fr)] lg:items-start lg:gap-6">
+              {/* Preview */}
+              <div className="flex shrink-0 justify-center lg:justify-start">
+                {qrisUrl ? (
+                  <div className="flex flex-col items-center gap-2">
+                    <div className="w-36 h-36 rounded-2xl overflow-hidden border-2 border-slate-200 bg-white relative">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={qrisUrl} alt="QRIS" className="w-full h-full object-contain p-1" />
+                    </div>
+                    <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full ${
+                      qrisPayloadSaved
+                        ? "bg-green-100 text-green-700"
+                        : "bg-red-100 text-red-700"
+                    }`}>
+                      {qrisPayloadSaved ? "QRIS terverifikasi ✓" : "Belum terverifikasi"}
+                    </span>
                   </div>
-                  <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full ${
-                    qrisPayloadSaved
-                      ? "bg-green-100 text-green-700"
-                      : "bg-amber-100 text-amber-700"
-                  }`}>
-                    {qrisPayloadSaved ? "Dinamis ✓" : "Statis — upload ulang"}
-                  </span>
-                </div>
-              ) : (
-                <div className="w-36 h-36 rounded-2xl border-2 border-dashed border-slate-200 bg-slate-50 flex flex-col items-center justify-center gap-2">
-                  <QrCode className="w-8 h-8 text-slate-300" />
-                  <span className="text-xs text-slate-400 text-center">Belum ada QRIS</span>
-                </div>
-              )}</div>
+                ) : (
+                  <div className="w-36 h-36 rounded-2xl border-2 border-dashed border-slate-200 bg-slate-50 flex flex-col items-center justify-center gap-2">
+                    <QrCode className="w-8 h-8 text-slate-300" />
+                    <span className="text-xs text-slate-400 text-center">Belum ada QRIS</span>
+                  </div>
+                )}
+              </div>
 
-            {/* Actions */}
-            {isOwner && (
-              <div className="flex-1 space-y-3">
-                <p className="text-sm text-slate-500 leading-relaxed">
-                  Upload screenshot atau foto QRIS dari aplikasi bank Anda. Gambar ini akan muncul di layar kasir saat pelanggan memilih metode QRIS.
-                </p>
-                <div className="flex gap-2">
-                  <button
-                    onClick={() => qrisInputRef.current?.click()}
-                    disabled={qrisUploading}
-                    className="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white text-sm font-medium rounded-full transition-colors"
-                  >
-                    {qrisUploading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
-                    {qrisUploading ? "Mengupload..." : qrisUrl ? "Ganti QRIS" : "Upload QRIS"}
-                  </button>
-                  {qrisUrl && (
+              {/* Actions */}
+              {isOwner && (
+                <div className="flex-1 space-y-3">
+                  <p className="text-sm text-slate-500 leading-relaxed">
+                    Upload foto atau screenshot QRIS yang jelas. Sistem akan membaca kode, memeriksa format QRIS Indonesia, dan menolak gambar biasa atau QR selain QRIS.
+                  </p>
+                  <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
                     <button
-                      onClick={handleQrisDelete}
-                      className="flex items-center gap-2 px-4 py-2 text-sm text-red-600 border border-red-200 hover:bg-red-50 rounded-full transition-colors"
+                      onClick={() => qrisInputRef.current?.click()}
+                      disabled={qrisUploading}
+                      className="flex items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-emerald-700 disabled:opacity-60 sm:rounded-full"
                     >
-                      <Trash2 className="w-4 h-4" />
-                      Hapus
+                      {qrisUploading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
+                      {qrisUploading ? "Mengupload..." : qrisUrl ? "Ganti QRIS" : "Upload QRIS"}
                     </button>
-                  )}
+                    {qrisUrl && (
+                      <button
+                        onClick={handleQrisDelete}
+                        className="flex items-center justify-center gap-2 rounded-xl border border-red-200 px-4 py-2.5 text-sm text-red-600 transition-colors hover:bg-red-50 sm:rounded-full"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                        Hapus
+                      </button>
+                    )}
+                  </div>
+                  <input
+                    ref={qrisInputRef}
+                    type="file"
+                    accept="image/png,image/jpeg,image/jpg,image/webp"
+                    className="hidden"
+                    onChange={handleQrisUpload}
+                  />
+                  <p className="text-xs text-slate-400">Format PNG, JPG, WEBP · Maks 5MB · QRIS wajib terbaca</p>
                 </div>
-                <input
-                  ref={qrisInputRef}
-                  type="file"
-                  accept="image/png,image/jpeg,image/jpg,image/webp"
-                  className="hidden"
-                  onChange={handleQrisUpload}
-                />
-                <p className="text-xs text-slate-400">Format PNG, JPG, WEBP · Maks 5MB</p>
-              </div>
-            )}
-            {!isOwner && (
-              <div className="flex-1 flex items-center">
-                <p className="text-sm text-slate-400">Hanya Owner yang dapat mengubah pengaturan QRIS.</p>
-              </div>
-            )}
+              )}
+              {!isOwner && (
+                <div className="flex-1 flex items-center">
+                  <p className="text-sm text-slate-400">Hanya Owner yang dapat mengubah pengaturan QRIS.</p>
+                </div>
+              )}
+            </div>
           </div>
         </div>
-      </div>
+      )}
 
       {/* QR Menu Digital */}
-      <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
-        <div className="px-6 py-4 border-b border-slate-100 flex items-center gap-3">
-          <div className="w-8 h-8 bg-purple-100 rounded-lg flex items-center justify-center">
+      <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+        <div className="flex items-start gap-3 border-b border-slate-100 px-4 py-4 sm:items-center sm:px-6">
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-purple-100">
             <QrCode className="w-4 h-4 text-purple-600" />
           </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <div className="font-semibold text-slate-900 text-sm">QR Menu Digital</div>
-              <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-slate-100 text-slate-500">Hubungi Admin</span>
-            </div>
+          <div className="min-w-0">
+            <div className="font-semibold text-slate-900 text-sm">QR Menu Digital</div>
             <div className="text-xs text-slate-400">Satu QR per outlet (nomor meja diisi manual), atau buat QR per meja yang otomatis terkunci</div>
           </div>
         </div>
 
-        <div className="px-6 py-5">
+        <div className="p-4 sm:p-6">
           {locations.length === 0 ? (
             <div className="text-center py-8 text-slate-400 text-sm">Belum ada outlet aktif</div>
           ) : (
             <div className="space-y-2">
               {locations.map((loc) => (
                 <div key={loc.id} className="rounded-xl border border-slate-100 overflow-hidden">
-                  <div className="flex items-center gap-3 p-3 hover:bg-slate-50">
+                  <div className="flex flex-col gap-3 p-3 hover:bg-slate-50 lg:flex-row lg:items-center">
                     <div className="flex-1 min-w-0">
                       <div className="text-sm font-semibold text-slate-900">{loc.name}</div>
                     </div>
-                    <button
-                      onClick={async () => { setQrModal(loc); await generateQr(loc.menuToken) }}
-                      className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-purple-700 bg-purple-50 hover:bg-purple-100 rounded-lg transition-colors shrink-0"
-                    >
-                      <Eye className="w-3.5 h-3.5" /> Lihat QR Outlet
-                    </button>
-                    <button
-                      onClick={() => toggleExpandLoc(loc)}
-                      className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors shrink-0"
-                    >
-                      Kelola Meja
-                      <ChevronDown className={`w-3.5 h-3.5 transition-transform ${expandedLoc === loc.id ? "rotate-180" : ""}`} />
-                    </button>
+                    <div className="grid w-full grid-cols-1 gap-2 sm:grid-cols-2 lg:flex lg:w-auto">
+                      <button
+                        onClick={async () => { setQrModal(loc); await generateQr(loc.menuToken) }}
+                        className="flex items-center justify-center gap-1 rounded-lg bg-purple-50 px-3 py-2 text-xs font-medium text-purple-700 transition-colors hover:bg-purple-100 lg:shrink-0"
+                      >
+                        <Eye className="w-3.5 h-3.5" /> Lihat QR Outlet
+                      </button>
+                      <button
+                        onClick={() => toggleExpandLoc(loc)}
+                        className="flex items-center justify-center gap-1 rounded-lg bg-slate-100 px-3 py-2 text-xs font-medium text-slate-600 transition-colors hover:bg-slate-200 lg:shrink-0"
+                      >
+                        Kelola Meja
+                        <ChevronDown className={`w-3.5 h-3.5 transition-transform ${expandedLoc === loc.id ? "rotate-180" : ""}`} />
+                      </button>
+                    </div>
                   </div>
 
                   {expandedLoc === loc.id && (
@@ -548,7 +693,7 @@ export default function SettingsPage() {
                             <div className="text-xs text-slate-400 text-center py-2">Belum ada meja</div>
                           )}
                           {(tables[loc.id] ?? []).map((table) => (
-                            <div key={table.id} className="flex items-center gap-2 bg-white rounded-lg border border-slate-100 px-3 py-2">
+                            <div key={table.id} className="flex items-center gap-2 rounded-lg border border-slate-100 bg-white px-3 py-2">
                               <div className={`flex-1 min-w-0 text-sm font-medium truncate ${table.isActive ? "text-slate-900" : "text-slate-400 line-through"}`}>
                                 {table.name}
                               </div>
@@ -559,7 +704,7 @@ export default function SettingsPage() {
                               >
                                 <QrCode className="w-3.5 h-3.5" />
                               </button>
-                              {isOwner && (
+                              {canManageTables && (
                                 <>
                                   <button
                                     onClick={() => toggleTableActive(loc, table)}
@@ -579,20 +724,20 @@ export default function SettingsPage() {
                               )}
                             </div>
                           ))}
-                          {isOwner && (
-                            <div className="flex gap-2 pt-1">
+                          {canManageTables && (
+                            <div className="flex flex-col gap-2 pt-1 sm:flex-row">
                               <input
                                 type="text"
                                 value={newTableName}
                                 onChange={(e) => setNewTableName(e.target.value)}
                                 onKeyDown={(e) => e.key === "Enter" && addTable(loc)}
                                 placeholder="Contoh: Meja 5"
-                                className="flex-1 px-3 py-2 text-sm rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                className="min-h-10 flex-1 rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                               />
                               <button
                                 onClick={() => addTable(loc)}
                                 disabled={addingTable || !newTableName.trim()}
-                                className="flex items-center gap-1 px-3 py-2 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 rounded-lg transition-colors shrink-0"
+                                className="flex min-h-10 shrink-0 items-center justify-center gap-1 rounded-lg bg-blue-600 px-3 py-2 text-xs font-semibold text-white transition-colors hover:bg-blue-700 disabled:opacity-50"
                               >
                                 {addingTable ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />}
                                 Tambah
@@ -610,31 +755,45 @@ export default function SettingsPage() {
         </div>
       </div>
 
+      {isOwner && <WhatsAppIntegrationSettings />}
+
       {/* QR Modal */}
       {qrModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
-          <div className="absolute inset-0 bg-black/60" onClick={() => { setQrModal(null) }} />
-          <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-sm z-10 overflow-hidden">
+        <div className="app-overlay z-50 flex items-end justify-center sm:items-center sm:p-4">
+          <div className="absolute inset-0 bg-slate-950/55 backdrop-blur-[3px]" onClick={() => { setQrModal(null) }} />
+          <div className="relative z-10 max-h-[calc(100%-3rem)] w-full max-w-sm overflow-y-auto rounded-t-3xl border border-slate-200 bg-white shadow-2xl sm:rounded-2xl">
             <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
               <div>
                 <div className="font-bold text-slate-900">{qrModal.name}</div>
                 <div className="text-xs text-slate-400">QR Menu Digital</div>
               </div>
-              <button onClick={() => { setQrModal(null) }} className="p-1.5 hover:bg-slate-100 rounded-full">
+              <button onClick={() => { setQrModal(null) }} className="rounded-lg p-1.5 hover:bg-slate-100">
                 <X className="w-4 h-4 text-slate-500" />
               </button>
             </div>
-            <div className="px-6 py-6 flex flex-col items-center gap-4">
+            <div className="flex flex-col items-center gap-4 p-5 sm:p-6">
               {qrDataUrl[qrModal.menuToken] ? (
                 // eslint-disable-next-line @next/next/no-img-element
-                <img src={qrDataUrl[qrModal.menuToken]} alt="QR" className="w-52 h-52 rounded-2xl border border-slate-100" />
+                <img src={qrDataUrl[qrModal.menuToken]} alt="QR" className="h-44 w-44 rounded-2xl border border-slate-100 sm:h-52 sm:w-52" />
               ) : (
-                <div className="w-52 h-52 flex items-center justify-center"><Loader2 className="w-8 h-8 animate-spin text-slate-300" /></div>
+                <div className="flex h-44 w-44 items-center justify-center sm:h-52 sm:w-52"><Loader2 className="w-8 h-8 animate-spin text-slate-300" /></div>
               )}
+              <div className="w-full rounded-xl bg-slate-50 border border-slate-200 px-3 py-2.5 text-center">
+                <div className="text-[11px] text-slate-400 mb-1">Alamat yang dibuka QR</div>
+                <a
+                  href={menuUrl(qrModal.menuToken)}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="block text-xs text-blue-600 hover:text-blue-700 break-all underline"
+                >
+                  {menuUrl(qrModal.menuToken)}
+                </a>
+              </div>
+              <p className="text-xs text-slate-400 text-center">Untuk pengujian lokal, HP harus terhubung ke Wi-Fi yang sama dengan komputer ini.</p>
               <button
                 onClick={() => downloadQr(qrModal.menuToken, qrModal.name)}
                 disabled={!qrDataUrl[qrModal.menuToken]}
-                className="flex items-center gap-2 px-5 py-2.5 bg-purple-600 hover:bg-purple-700 disabled:opacity-40 text-white text-sm font-semibold rounded-full"
+                className="flex w-full items-center justify-center gap-2 rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-40 sm:w-auto"
               >
                 <Download className="w-3.5 h-3.5" /> Download
               </button>
@@ -645,30 +804,38 @@ export default function SettingsPage() {
 
       {/* Table QR Modal */}
       {tableQrModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
-          <div className="absolute inset-0 bg-black/60" onClick={() => setTableQrModal(null)} />
-          <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-sm z-10 overflow-hidden">
+        <div className="app-overlay z-50 flex items-end justify-center sm:items-center sm:p-4">
+          <div className="absolute inset-0 bg-slate-950/55 backdrop-blur-[3px]" onClick={() => setTableQrModal(null)} />
+          <div className="relative z-10 max-h-[calc(100%-3rem)] w-full max-w-sm overflow-y-auto rounded-t-3xl border border-slate-200 bg-white shadow-2xl sm:rounded-2xl">
             <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
               <div>
                 <div className="font-bold text-slate-900">{tableQrModal.table.name}</div>
                 <div className="text-xs text-slate-400">{tableQrModal.loc.name} · QR Meja (terkunci)</div>
               </div>
-              <button onClick={() => setTableQrModal(null)} className="p-1.5 hover:bg-slate-100 rounded-full">
+              <button onClick={() => setTableQrModal(null)} className="rounded-lg p-1.5 hover:bg-slate-100">
                 <X className="w-4 h-4 text-slate-500" />
               </button>
             </div>
-            <div className="px-6 py-6 flex flex-col items-center gap-4">
+            <div className="flex flex-col items-center gap-4 p-5 sm:p-6">
               {tableQrDataUrl[tableQrModal.table.tableToken] ? (
                 // eslint-disable-next-line @next/next/no-img-element
-                <img src={tableQrDataUrl[tableQrModal.table.tableToken]} alt="QR" className="w-52 h-52 rounded-2xl border border-slate-100" />
+                <img src={tableQrDataUrl[tableQrModal.table.tableToken]} alt="QR" className="h-44 w-44 rounded-2xl border border-slate-100 sm:h-52 sm:w-52" />
               ) : (
-                <div className="w-52 h-52 flex items-center justify-center"><Loader2 className="w-8 h-8 animate-spin text-slate-300" /></div>
+                <div className="flex h-44 w-44 items-center justify-center sm:h-52 sm:w-52"><Loader2 className="w-8 h-8 animate-spin text-slate-300" /></div>
               )}
               <p className="text-xs text-slate-400 text-center">Customer yang scan QR ini otomatis masuk ke meja {tableQrModal.table.name} — nomor meja tidak bisa diubah.</p>
+              <a
+                href={menuUrl(tableQrModal.loc.menuToken, tableQrModal.table.tableToken)}
+                target="_blank"
+                rel="noreferrer"
+                className="w-full rounded-xl bg-slate-50 border border-slate-200 px-3 py-2.5 text-xs text-blue-600 hover:text-blue-700 break-all text-center underline"
+              >
+                {menuUrl(tableQrModal.loc.menuToken, tableQrModal.table.tableToken)}
+              </a>
               <button
                 onClick={() => downloadTableQr(tableQrModal.loc, tableQrModal.table)}
                 disabled={!tableQrDataUrl[tableQrModal.table.tableToken]}
-                className="flex items-center gap-2 px-5 py-2.5 bg-purple-600 hover:bg-purple-700 disabled:opacity-40 text-white text-sm font-semibold rounded-full"
+                className="flex w-full items-center justify-center gap-2 rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-40 sm:w-auto"
               >
                 <Download className="w-3.5 h-3.5" /> Download
               </button>
@@ -679,34 +846,42 @@ export default function SettingsPage() {
 
       {/* Pengaturan Struk */}
       {isOwner && (
-        <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
-          <div className="px-6 py-4 border-b border-slate-100 flex items-center gap-2">
-            <FileText className="w-4 h-4 text-slate-400" />
-            <div>
+        <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+          <div className="flex items-center gap-3 border-b border-slate-100 px-4 py-4 sm:px-6">
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-slate-100">
+              <FileText className="w-4 h-4 text-slate-500" />
+            </div>
+            <div className="min-w-0">
               <div className="font-semibold text-slate-900 text-sm">Pengaturan Struk</div>
               <div className="text-xs text-slate-400">Perubahan langsung terlihat di preview</div>
             </div>
           </div>
-          <div className="flex flex-col lg:flex-row">
+          <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_18rem]">
             {/* Form */}
-            <div className="flex-1 px-6 py-5 space-y-5 lg:border-r border-slate-100">
+            <div className="space-y-5 p-4 sm:p-6 lg:border-r lg:border-slate-100">
               {/* Logo */}
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-2">Logo</label>
                 {receiptLogo ? (
-                  <div className="flex items-center gap-3">
-                    <img src={receiptLogo} alt="Logo struk" className="h-12 w-auto object-contain rounded-xl border border-slate-200 bg-slate-50 p-1" />
+                  <div className="flex flex-wrap items-center gap-3">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={receiptLogo}
+                      alt="Logo struk"
+                      className="h-12 w-auto object-contain rounded-xl border border-slate-200 bg-slate-50 p-1"
+                      onError={() => setReceiptLogo(null)}
+                    />
                     <button onClick={() => setReceiptLogo(null)} className="text-xs text-red-500 hover:underline flex items-center gap-1">
                       <Trash2 className="w-3.5 h-3.5" /> Hapus
                     </button>
                   </div>
                 ) : (
-                  <label className="flex items-center gap-2 w-fit px-4 py-2.5 rounded-xl border border-dashed border-slate-300 hover:border-blue-300 hover:bg-blue-50/40 cursor-pointer transition-colors text-sm text-slate-500">
+                  <label className="flex w-full cursor-pointer items-center justify-center gap-2 rounded-xl border border-dashed border-slate-300 px-4 py-2.5 text-sm text-slate-500 transition-colors hover:border-blue-300 hover:bg-blue-50/40 sm:w-fit">
                     <input type="file" accept="image/*" className="hidden" onChange={handleReceiptLogoUpload} />
                     {receiptLogoUploading ? <><Loader2 className="w-4 h-4 animate-spin text-blue-500" /> Mengupload...</> : <><Camera className="w-4 h-4" /> Upload Logo</>}
                   </label>
                 )}
-                <p className="text-xs text-slate-400 mt-1.5">Muncul di atas nama bisnis. PNG/JPG.</p>
+                <p className="text-xs text-slate-400 mt-1.5">Opsional. Jika kosong, nama bisnis langsung berada di bagian paling atas struk.</p>
               </div>
 
               {/* WiFi */}
@@ -714,14 +889,14 @@ export default function SettingsPage() {
                 <label className="flex items-center gap-1.5 text-sm font-medium text-slate-700 mb-2">
                   <Wifi className="w-4 h-4 text-slate-400" /> Info WiFi
                 </label>
-                <div className="space-y-2">
+                <div className="grid grid-cols-1 gap-2 xl:grid-cols-2">
                   <input type="text" placeholder="Nama WiFi (SSID)"
                     value={receiptWifiName} onChange={(e) => setReceiptWifiName(e.target.value)}
-                    className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="min-h-11 w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
                   <input type="text" placeholder="Password WiFi"
                     value={receiptWifiPassword} onChange={(e) => setReceiptWifiPassword(e.target.value)}
-                    className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="min-h-11 w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
                 </div>
               </div>
@@ -732,13 +907,13 @@ export default function SettingsPage() {
                 <input type="text" placeholder="Contoh: Terima kasih! Follow IG kami @cafekita"
                   value={receiptFooter} onChange={(e) => setReceiptFooter(e.target.value)}
                   maxLength={120}
-                  className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="min-h-11 w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
                 <p className="text-xs text-slate-400 mt-1">{receiptFooter.length}/120</p>
               </div>
 
               <button onClick={handleReceiptSave} disabled={receiptSaving}
-                className="flex items-center gap-2 px-5 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white text-sm font-semibold rounded-full transition-colors"
+                className="flex w-full items-center justify-center gap-2 rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-blue-700 disabled:opacity-60 sm:w-auto sm:rounded-full"
               >
                 {receiptSaving ? <><Loader2 className="w-4 h-4 animate-spin" /> Menyimpan...</>
                   : receiptSaved ? <><CheckCircle className="w-4 h-4" /> Tersimpan!</>
@@ -747,8 +922,8 @@ export default function SettingsPage() {
             </div>
 
             {/* Live Preview */}
-            <div className="lg:w-72 bg-slate-50 px-6 py-5 flex flex-col items-center">
-              <p className="text-xs font-medium text-slate-400 uppercase tracking-widest mb-4">Preview Struk</p>
+            <div className="flex flex-col items-center border-t border-slate-100 bg-slate-50 p-4 lg:border-t-0">
+              <p className="mb-3 text-xs font-medium uppercase tracking-widest text-slate-400">Preview Struk</p>
               <div className="w-full max-w-60 bg-white shadow-lg rounded-sm"
                 style={{ fontFamily: "'Courier New', Courier, monospace", fontSize: "10px" }}>
                 {/* Gigi kertas atas */}
@@ -758,11 +933,17 @@ export default function SettingsPage() {
                   </svg>
                 </div>
 
-                <div className="px-4 pb-4 pt-1">
+                <div className={`px-4 pb-4 ${receiptLogo ? "pt-1" : "pt-0"}`}>
                   {/* Logo */}
                   {receiptLogo && (
                     <div className="text-center mb-2">
-                      <img src={receiptLogo} alt="Logo" className="h-10 w-auto object-contain mx-auto" />
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={receiptLogo}
+                        alt=""
+                        className="h-10 w-auto object-contain mx-auto"
+                        onError={() => setReceiptLogo(null)}
+                      />
                     </div>
                   )}
 
@@ -790,8 +971,6 @@ export default function SettingsPage() {
                   <div className="space-y-1.5">
                     {[
                       { name: "Kopi Susu", qty: 2, price: 25000 },
-                      { name: "Croissant", qty: 1, price: 18000 },
-                      { name: "Es Teh Manis", qty: 1, price: 8000 },
                     ].map((item) => (
                       <div key={item.name}>
                         <div className="flex justify-between">
@@ -808,7 +987,7 @@ export default function SettingsPage() {
                   {/* Total */}
                   <div className="flex justify-between font-black" style={{ fontSize: "12px" }}>
                     <span>TOTAL</span>
-                    <span>Rp 76.000</span>
+                    <span>Rp 50.000</span>
                   </div>
 
                   <div className="border-t border-dashed border-slate-300 my-2" />
@@ -839,26 +1018,110 @@ export default function SettingsPage() {
         </div>
       )}
 
-      <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
-        <div className="px-6 py-4 border-b border-slate-100">
+      <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+        <div className="border-b border-slate-100 px-4 py-4 sm:px-6">
           <div className="font-semibold text-slate-900 text-sm">Paket Berlangganan</div>
           <div className="text-xs text-slate-400">Status langganan bisnis ini</div>
         </div>
-        <div className="px-6 py-5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+        <div className="flex flex-col gap-4 p-4 sm:p-6 lg:flex-row lg:items-center lg:justify-between">
           <div>
             <div className="flex items-center gap-2">
-              <span className="font-bold text-slate-900">Starter</span>
+              <span className="font-bold text-slate-900">{PLAN_META[plan]?.name ?? "—"}</span>
               <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-medium">Aktif</span>
             </div>
-            <div className="text-sm text-slate-500 mt-0.5">Hingga 3 outlet, semua fitur dasar</div>
+            <div className="text-sm text-slate-500 mt-0.5">
+              {PLAN_META[plan] ? `${PLAN_META[plan].price}/bln · ${PLAN_META[plan].desc}` : "Memuat..."}
+            </div>
           </div>
           {isOwner && (
-            <button className="px-4 py-2 text-sm font-medium text-blue-600 hover:text-blue-700 border border-blue-200 hover:border-blue-300 rounded-xl transition-colors">
-              Upgrade
+            <button
+              onClick={() => setPlanModal(true)}
+              className="w-full shrink-0 rounded-xl border border-blue-200 px-4 py-2.5 text-sm font-medium text-blue-600 transition-colors hover:border-blue-300 hover:text-blue-700 lg:w-auto"
+            >
+              Ubah Paket
             </button>
           )}
         </div>
       </div>
+
+      {/* Modal Ubah Paket */}
+      {planModal && (
+        <div className="app-overlay z-50 flex items-end justify-center sm:items-center sm:p-4">
+          <div className="absolute inset-0 bg-slate-950/55 backdrop-blur-[3px]" onClick={() => setPlanModal(false)} />
+          <div className="relative z-10 max-h-[calc(100%-3rem)] w-full max-w-md overflow-y-auto rounded-t-3xl border border-slate-200 bg-white shadow-2xl sm:rounded-2xl">
+            {planChangedTo ? (
+              <div className="p-6 text-center">
+                <div className="w-14 h-14 bg-emerald-50 rounded-full flex items-center justify-center mx-auto mb-4">
+                  <CheckCircle className="w-7 h-7 text-emerald-600" />
+                </div>
+                <h2 className="text-lg font-bold text-slate-900">Paket diubah ke {PLAN_META[planChangedTo]?.name}</h2>
+                <p className="text-sm text-slate-500 mt-1.5 leading-relaxed">
+                  Menu dan fitur akan menyesuaikan paket baru setelah Anda masuk kembali.
+                </p>
+                <button
+                  onClick={async () => { await signOut({ redirect: false }); window.location.href = "/login" }}
+                  className="mt-5 w-full rounded-xl bg-blue-600 py-3 font-semibold text-white transition-colors hover:bg-blue-700"
+                >
+                  Masuk Ulang Sekarang
+                </button>
+              </div>
+            ) : (
+            <>
+            <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
+              <div>
+                <div className="font-bold text-slate-900">Ubah Paket Langganan</div>
+                <div className="text-xs text-slate-400">Pilih paket yang sesuai kebutuhan bisnis Anda</div>
+              </div>
+              <button onClick={() => setPlanModal(false)} className="rounded-lg p-1.5 hover:bg-slate-100">
+                <X className="w-4 h-4 text-slate-500" />
+              </button>
+            </div>
+            <div className="space-y-3 p-4 sm:p-5">
+              {PLAN_ORDER.map((key) => {
+                const meta = PLAN_META[key]
+                const isCurrent = key === plan
+                const currentRank = PLAN_META[plan]?.rank ?? 0
+                const action = isCurrent ? "Paket Aktif" : meta.rank > currentRank ? "Upgrade" : "Downgrade"
+                return (
+                  <div
+                    key={key}
+                    className={`rounded-2xl border-2 p-4 transition-all ${isCurrent ? "border-blue-600 bg-blue-50" : "border-slate-200"}`}
+                  >
+                    <div className="flex flex-col items-stretch gap-3 sm:flex-row sm:items-start sm:justify-between">
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className={`font-bold ${isCurrent ? "text-blue-700" : "text-slate-900"}`}>{meta.name}</span>
+                          {isCurrent && <span className="text-xs bg-blue-600 text-white px-2 py-0.5 rounded-full font-medium">Aktif</span>}
+                        </div>
+                        <div className="text-sm font-bold text-slate-700 mt-0.5">{meta.price}<span className="font-normal text-slate-400">/bln</span></div>
+                        <div className="text-xs text-slate-500 mt-1">{meta.desc}</div>
+                      </div>
+                      <button
+                        onClick={() => changePlan(key)}
+                        disabled={isCurrent || planSaving !== null}
+                        className={`shrink-0 rounded-xl px-4 py-2 text-sm font-semibold transition-colors ${
+                          isCurrent
+                            ? "bg-slate-100 text-slate-400 cursor-default"
+                            : action === "Upgrade"
+                            ? "bg-blue-600 hover:bg-blue-700 text-white"
+                            : "border border-slate-300 text-slate-600 hover:bg-slate-50"
+                        }`}
+                      >
+                        {planSaving === key ? <Loader2 className="w-4 h-4 animate-spin" /> : action}
+                      </button>
+                    </div>
+                  </div>
+                )
+              })}
+              <p className="text-xs text-slate-400 text-center pt-1">Perubahan paket berlaku langsung setelah dipilih.</p>
+            </div>
+            </>
+            )}
+          </div>
+        </div>
+      )}
+
+      {dialog}
     </div>
   )
 }

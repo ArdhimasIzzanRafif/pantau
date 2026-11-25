@@ -5,7 +5,9 @@ import { requireAuth, isResponse, ok, err } from "@/lib/api-helpers"
 export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const user = await requireAuth()
   if (isResponse(user)) return user
-  if (user.role !== "OWNER") return err("Tidak diizinkan", 403)
+  // QR meja diurus juga oleh Supervisor dan Admin Gudang yang menyiapkan outlet,
+  // bukan hanya Owner.
+  if (!["OWNER", "SUPERVISOR", "ADMIN_GUDANG"].includes(user.role)) return err("Tidak diizinkan", 403)
 
   const { id } = await params
   const body = await req.json()
@@ -30,7 +32,9 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
 export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const user = await requireAuth()
   if (isResponse(user)) return user
-  if (user.role !== "OWNER") return err("Tidak diizinkan", 403)
+  // QR meja diurus juga oleh Supervisor dan Admin Gudang yang menyiapkan outlet,
+  // bukan hanya Owner.
+  if (!["OWNER", "SUPERVISOR", "ADMIN_GUDANG"].includes(user.role)) return err("Tidak diizinkan", 403)
 
   const { id } = await params
 

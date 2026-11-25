@@ -45,9 +45,7 @@ export async function POST(req: NextRequest) {
           users: {
             create: { userId: newUser.id, role: "OWNER" },
           },
-          locations: {
-            create: { name: "Gudang Pusat", type: "WAREHOUSE" },
-          },
+          // Tidak membuat lokasi default — owner menambahkan gudang/outlet sendiri.
         },
       })
 

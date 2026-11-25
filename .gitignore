@@ -32,6 +32,7 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+!.env.example
 
 # vercel
 .vercel
@@ -44,3 +45,13 @@ next-env.d.ts
 
 # user-uploaded runtime content (menu photos, QRIS, receipt logos)
 /public/uploads
+
+# local database snapshots before demo data resets
+/.local-backups/
+
+# Private credentials and database exports
+*.key
+*.p12
+*.pfx
+*.dump
+*.backup

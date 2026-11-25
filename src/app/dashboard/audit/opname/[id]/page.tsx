@@ -1,24 +1,30 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { useParams, useRouter } from "next/navigation"
+import { useParams, useRouter, useSearchParams } from "next/navigation"
+import { InfoRow, InfoNote } from "@/components/ui/info-card"
 import { useSession } from "next-auth/react"
 import { ArrowLeft, ClipboardList, Package } from "lucide-react"
 
 type OpnameItem = {
-  id: string; systemQty: number; physicalQty: number | null; difference: number | null
+  // Kolom Decimal tiba sebagai string lewat JSON, bukan number — jangan
+  // dibandingkan langsung dengan angka.
+  id: string; systemQty: number | string; physicalQty: number | string | null; difference: number | string | null
   estimatedLoss: number | null; notes: string | null
-  item: { name: string; unit: string }
+  item: { name: string; unit: string; isTrackable: boolean }
 }
 type Opname = {
   id: string; status: string; shift: string | null
   periodStart: string; periodEnd: string; createdAt: string
+  reviewedAt: string | null; reviewNotes: string | null
   location: { name: string }; items: OpnameItem[]
 }
 
 const STATUS: Record<string, { label: string; color: string }> = {
-  DRAFT:     { label: "Draf",     color: "bg-slate-100 text-slate-600" },
-  SUBMITTED: { label: "Diajukan", color: "bg-green-100 text-green-700" },
+  DRAFT:     { label: "Sedang dilakukan", color: "bg-amber-100 text-amber-700" },
+  SUBMITTED: { label: "Data Lama", color: "bg-slate-100 text-slate-600" },
+  REVIEWED:  { label: "Selesai", color: "bg-green-100 text-green-700" },
+  REJECTED:  { label: "Tidak Dibukukan", color: "bg-red-100 text-red-700" },
 }
 
 function fmtDate(s: string) {
@@ -37,6 +43,8 @@ function formatRp(n: number) {
 export default function OpnameDetailPage() {
   const { id }   = useParams<{ id: string }>()
   const router   = useRouter()
+  const searchParams = useSearchParams()
+  const historyQuery = searchParams.get("scope") === "history" ? "?history=1" : ""
   const { data: session } = useSession()
   const role = (session?.user as { role?: string } | undefined)?.role
   const isSupervisor = role === "SUPERVISOR"
@@ -46,12 +54,12 @@ export default function OpnameDetailPage() {
   const [error, setError]     = useState("")
 
   useEffect(() => {
-    fetch(`/api/opnames/${id}`)
+    fetch(`/api/opnames/${id}${historyQuery}`)
       .then((r) => r.ok ? r.json() : Promise.reject())
       .then(setData)
       .catch(() => setError("Data tidak ditemukan"))
       .finally(() => setLoading(false))
-  }, [id])
+  }, [historyQuery, id])
 
   if (loading) return (
     <div className="flex items-center justify-center h-64">
@@ -63,7 +71,7 @@ export default function OpnameDetailPage() {
   )
 
   const st        = STATUS[data.status] ?? { label: data.status, color: "bg-slate-100 text-slate-600" }
-  const selisih   = data.items.filter((i) => i.difference !== null && i.difference !== 0)
+  const selisih   = data.items.filter((i) => i.item.isTrackable && i.difference !== null && Number(i.difference) !== 0)
   const totalLoss = selisih.reduce((s, i) => s + Number(i.estimatedLoss ?? 0), 0)
 
   return (
@@ -82,19 +90,26 @@ export default function OpnameDetailPage() {
       </div>
 
       {/* Summary — Supervisor hanya lihat jumlah item */}
-      <div className={`grid gap-3 ${isSupervisor ? "grid-cols-1" : "grid-cols-1 sm:grid-cols-3"}`}>
-        <div className="bg-white rounded-2xl border border-slate-200 p-4">
-          <div className="text-xs text-slate-400 mb-1">Total Item</div>
-          <div className="text-lg font-bold text-slate-800">{data.items.length}</div>
+      {/* Tetap sebaris di layar HP; angka yang kepanjangan dipotong dengan elipsis
+          supaya kartunya tidak melebar dan memaksa geser ke samping. */}
+      <div className={`grid gap-2 sm:gap-3 ${isSupervisor ? "grid-cols-1" : "grid-cols-3"}`}>
+        <div className="min-w-0 rounded-2xl border border-slate-200 bg-white p-3 sm:p-4">
+          <div className="truncate text-xs text-slate-400 mb-1">Total Item</div>
+          <div className="truncate text-base font-bold text-slate-800 sm:text-lg">{data.items.length}</div>
         </div>
         {!isSupervisor && <>
-          <div className="bg-white rounded-2xl border border-slate-200 p-4">
-            <div className="text-xs text-slate-400 mb-1">Selisih Item</div>
-            <div className={`text-lg font-bold ${selisih.length > 0 ? "text-red-600" : "text-slate-800"}`}>{selisih.length}</div>
+          <div className="min-w-0 rounded-2xl border border-slate-200 bg-white p-3 sm:p-4">
+            <div className="truncate text-xs text-slate-400 mb-1">Selisih Item</div>
+            <div className={`truncate text-base font-bold sm:text-lg ${selisih.length > 0 ? "text-red-600" : "text-slate-800"}`}>{selisih.length}</div>
           </div>
-          <div className="bg-white rounded-2xl border border-slate-200 p-4">
-            <div className="text-xs text-slate-400 mb-1">Est. Kerugian</div>
-            <div className={`text-lg font-bold ${totalLoss > 0 ? "text-red-600" : "text-slate-800"}`}>
+          <div className="min-w-0 rounded-2xl border border-slate-200 bg-white p-3 sm:p-4">
+            <div className="truncate text-xs text-slate-400 mb-1">Est. Kerugian</div>
+            {/* Nilai rupiah jauh lebih panjang dari angka hitungan, jadi di layar
+                sempit dikecilkan dulu sebelum terpaksa dipotong. */}
+            <div
+              title={totalLoss > 0 ? formatRp(totalLoss) : undefined}
+              className={`truncate text-sm font-bold sm:text-lg ${totalLoss > 0 ? "text-red-600" : "text-slate-800"}`}
+            >
               {totalLoss > 0 ? formatRp(totalLoss) : "—"}
             </div>
           </div>
@@ -102,21 +117,22 @@ export default function OpnameDetailPage() {
       </div>
 
       {/* Info */}
-      <div className="bg-white rounded-2xl border border-slate-200 p-5">
-        <div className="flex items-center gap-2 text-slate-700 mb-3">
+      <div className="rounded-2xl border border-slate-200 bg-white p-4 sm:p-5">
+        <div className="mb-2 flex items-center gap-2 text-slate-700">
           <ClipboardList className="w-4 h-4 text-slate-400" />
-          <span className="text-sm font-medium">Info Opname</span>
+          <span className="text-sm font-semibold">Info Opname</span>
         </div>
-        <div className="grid grid-cols-2 gap-y-2 text-sm">
-          <span className="text-slate-400">Lokasi</span>
-          <span className="text-slate-800 font-medium">{data.location.name}</span>
-          <span className="text-slate-400">Periode</span>
-          <span className="text-slate-800">{fmtShort(data.periodStart)} – {fmtShort(data.periodEnd)}</span>
-          {data.shift && <>
-            <span className="text-slate-400">Shift</span>
-            <span className="text-slate-800">{data.shift}</span>
-          </>}
-        </div>
+        <dl className="divide-y divide-slate-100 text-sm">
+          <InfoRow label="Lokasi" value={data.location.name} />
+          <InfoRow label="Periode" value={<><span className="whitespace-nowrap">{fmtShort(data.periodStart)}</span>{" – "}<span className="whitespace-nowrap">{fmtShort(data.periodEnd)}</span></>} />
+          {data.shift && <InfoRow label="Shift" value={data.shift} />}
+          {data.reviewedAt && <InfoRow label="Diselesaikan" value={fmtDate(data.reviewedAt)} />}
+        </dl>
+        {data.status === "REJECTED" && data.reviewNotes && (
+          <div className="mt-3">
+            <InfoNote label="Catatan">{data.reviewNotes}</InfoNote>
+          </div>
+        )}
       </div>
 
       {/* Items */}
@@ -125,35 +141,41 @@ export default function OpnameDetailPage() {
           <Package className="w-4 h-4 text-slate-400" />
           <span className="text-sm font-medium text-slate-700">Hasil Penghitungan</span>
         </div>
-        <div className="divide-y divide-slate-100 overflow-x-auto">
-          <div className={`px-5 py-2 grid text-xs font-medium text-slate-400 min-w-90 grid-cols-4`}>
-            <span className="col-span-2">Item</span>
-            <span className="text-right">Stok Sistem</span>
-            <span className="text-right">Stok Fisik</span>
+        {/* Tiga kolom dengan lebar sama. Nama item yang panjang dipotong elipsis,
+            bukan melebarkan tabel — di HP tidak ada geser ke samping. */}
+        <div className="divide-y divide-slate-100">
+          <div className="grid grid-cols-3 gap-2 px-4 py-2 text-xs font-medium text-slate-400 sm:px-5">
+            <span className="truncate">Item</span>
+            <span className="truncate text-right">Stok Sistem</span>
+            <span className="truncate text-right">Stok Fisik</span>
           </div>
           {data.items.map((i) => {
-            const diff   = i.difference
-            const hasGap = !isSupervisor && diff !== null && diff !== 0
+            const diff   = i.difference === null ? null : Number(i.difference)
+            const hasGap = !isSupervisor && i.item.isTrackable && diff !== null && diff !== 0
+            const isBalanceUpdate = !i.item.isTrackable && diff !== null && diff !== 0
             return (
-              <div key={i.id} className={`px-5 py-3 grid grid-cols-4 items-start min-w-90 ${hasGap ? "bg-red-50/40" : ""}`}>
-                <div className="col-span-2">
-                  <div className="text-sm text-slate-800">{i.item.name}</div>
-                  {i.notes && <div className="text-xs text-slate-400 mt-0.5">{i.notes}</div>}
+              <div key={i.id} className={`grid grid-cols-3 items-start gap-2 px-4 py-3 sm:px-5 ${hasGap ? "bg-red-50/40" : ""}`}>
+                <div className="min-w-0">
+                  <div className="truncate text-sm text-slate-800" title={i.item.name}>{i.item.name}</div>
+                  {i.notes && <div className="truncate text-xs text-slate-400 mt-0.5" title={i.notes}>{i.notes}</div>}
                 </div>
-                <span className="text-right text-sm text-slate-500">{Number(i.systemQty)} {i.item.unit}</span>
-                <div className="text-right">
-                  <div className={`text-sm font-medium ${
+                <span className="min-w-0 truncate text-right text-sm text-slate-500">{Number(i.systemQty)} {i.item.unit}</span>
+                <div className="min-w-0 text-right">
+                  <div className={`truncate text-sm font-medium ${
                     !isSupervisor && hasGap ? (diff! < 0 ? "text-red-600" : "text-green-600") : "text-slate-800"
                   }`}>
                     {i.physicalQty !== null ? `${i.physicalQty} ${i.item.unit}` : "—"}
                   </div>
                   {!isSupervisor && hasGap && (
-                    <div className={`text-xs ${diff! < 0 ? "text-red-400" : "text-green-400"}`}>
+                    <div className={`truncate text-xs ${diff! < 0 ? "text-red-400" : "text-green-400"}`}>
                       {diff! > 0 ? "+" : ""}{diff}
                       {diff! < 0 && Number(i.estimatedLoss) > 0 && (
                         <span className="ml-1">({formatRp(Number(i.estimatedLoss))})</span>
                       )}
                     </div>
+                  )}
+                  {!isSupervisor && isBalanceUpdate && (
+                    <div className="truncate text-xs text-blue-500">Stok diperbarui</div>
                   )}
                 </div>
               </div>

@@ -399,7 +399,8 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                                 )
                               else
                                 ..._alerts.map((a) {
-                                  final crit = a['severity'] == 'CRITICAL';
+                                  // Dua tingkat: apa pun selain INFO dianggap kritis.
+                                  final crit = a['severity'] != 'INFO';
                                   return Container(
                                     padding: const EdgeInsets.symmetric(
                                       horizontal: 16,
@@ -423,7 +424,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                                           decoration: BoxDecoration(
                                             color: crit
                                                 ? AppTheme.danger
-                                                : AppTheme.warning,
+                                                : AppTheme.primary,
                                             shape: BoxShape.circle,
                                           ),
                                         ),

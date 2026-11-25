@@ -6,7 +6,12 @@
  * Tweak DAYS and ORDERS_PER_DAY to scale up or down.
  */
 
-import { PrismaClient } from "@prisma/client"
+import {
+  PrismaClient,
+  type OrderType,
+  type PaymentMethod,
+  type Prisma,
+} from "@prisma/client"
 import { PrismaPg } from "@prisma/adapter-pg"
 import { Pool } from "pg"
 import "dotenv/config"
@@ -20,9 +25,6 @@ const prisma  = new PrismaClient({ adapter })
 
 function rand(min: number, max: number) {
   return Math.floor(Math.random() * (max - min + 1)) + min
-}
-function randFloat(min: number, max: number) {
-  return Math.random() * (max - min) + min
 }
 function randomDate(daysAgo: number) {
   const d = new Date()
@@ -105,7 +107,7 @@ async function main() {
       })
 
       // Batch order creation for the day
-      const orderData = []
+      const orderData: Prisma.POSOrderUncheckedCreateInput[] = []
       let totalShiftSales = 0
 
       for (let o = 0; o < dayOrders; o++) {
@@ -123,8 +125,8 @@ async function main() {
           shiftId:        shift.id,
           cashierId:      cashierIds.length ? pick(cashierIds) : null,
           orderNumber:    `ORD-${Date.now()}-${o}`,
-          orderType:      pick(["DINE_IN", "TAKEAWAY", "DINE_IN"]) as any,
-          status:         "PAID" as any,
+          orderType:      pick<OrderType>(["DINE_IN", "TAKEAWAY", "DINE_IN"]),
+          status:         "PAID",
           subtotal,
           total,
           paidAt:         orderDate,
@@ -145,7 +147,7 @@ async function main() {
           },
           payments: {
             create: [{
-              method: pick(["CASH", "QRIS", "TRANSFER", "CASH"]),
+              method: pick<PaymentMethod>(["CASH", "QRIS", "TRANSFER", "CASH"]),
               amount: total,
               change: 0,
             }],

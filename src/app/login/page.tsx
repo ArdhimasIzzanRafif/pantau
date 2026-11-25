@@ -4,43 +4,57 @@ import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { useState } from "react"
 import { signIn, getSession } from "next-auth/react"
-import { BarChart3, Eye, EyeOff, Loader2, AlertCircle, TrendingUp, Shield, Zap } from "lucide-react"
+import { Eye, EyeOff, Loader2, TrendingUp, Shield, Zap } from "lucide-react"
+import { WarningModal } from "@/components/ui/warning-modal"
+import { PantauLogo } from "@/components/pantau-logo"
 
 export default function LoginPage() {
   const router = useRouter()
   const [showPassword, setShowPassword] = useState(false)
   const [loading, setLoading] = useState(false)
-  const [error, setError] = useState("")
+  const [warning, setWarning] = useState<{ title?: string; messages: string[] } | null>(null)
   const [form, setForm] = useState({ email: "", password: "" })
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
+
+    const issues: string[] = []
+    if (!form.email.trim()) issues.push("Email wajib diisi")
+    else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim())) issues.push("Format email tidak valid (contoh: nama@toko.com)")
+    if (!form.password) issues.push("Password wajib diisi")
+    if (issues.length > 0) {
+      setWarning({ title: "Lengkapi data dulu", messages: issues })
+      return
+    }
+
     setLoading(true)
-    setError("")
     const result = await signIn("credentials", {
       email: form.email,
       password: form.password,
       redirect: false,
     })
     if (result?.error) {
-      setError("Email atau password salah")
+      setWarning({ title: "Gagal masuk", messages: ["Email atau password salah. Coba periksa kembali."] })
       setLoading(false)
       return
     }
     const session = await getSession()
     const isSuperAdmin = !!(session?.user as Record<string, unknown>)?.isSuperAdmin
-    router.push(isSuperAdmin ? "/admin" : "/dashboard")
+    // Kembali ke tautan yang tadi dibuka (mis. tautan WhatsApp ke Transfer).
+    // Hanya alamat di dalam aplikasi ini yang diterima, bukan situs lain.
+    const callbackUrl = new URLSearchParams(window.location.search).get("callbackUrl")
+    const tujuanAman = callbackUrl && callbackUrl.startsWith("/") && !callbackUrl.startsWith("//") && !callbackUrl.startsWith("/login")
+      ? callbackUrl : null
+    router.push(isSuperAdmin ? "/admin" : tujuanAman ?? "/dashboard")
     router.refresh()
   }
 
   return (
-    <div className="min-h-screen flex">
+    <div className="auth-page min-h-screen min-h-dvh flex bg-white">
       {/* Left panel — brand */}
       <div className="hidden lg:flex lg:w-120 bg-slate-950 flex-col justify-between p-12 shrink-0">
         <Link href="/" className="flex items-center gap-2.5">
-          <div className="w-9 h-9 bg-blue-600 rounded-xl flex items-center justify-center">
-            <BarChart3 className="w-5 h-5 text-white" />
-          </div>
+          <PantauLogo className="h-9 w-9" priority />
           <span className="text-xl font-bold text-white">Pantau</span>
         </Link>
 
@@ -80,9 +94,7 @@ export default function LoginPage() {
         <div className="w-full max-w-sm">
           {/* Mobile logo */}
           <Link href="/" className="flex items-center gap-2 mb-8 lg:hidden">
-            <div className="w-9 h-9 bg-blue-600 rounded-xl flex items-center justify-center">
-              <BarChart3 className="w-5 h-5 text-white" />
-            </div>
+            <PantauLogo className="h-9 w-9" priority />
             <span className="text-xl font-bold text-slate-900">Pantau</span>
           </Link>
 
@@ -91,14 +103,7 @@ export default function LoginPage() {
             <p className="text-slate-500 text-sm">Masuk ke dashboard bisnis Anda</p>
           </div>
 
-          {error && (
-            <div className="mb-5 flex items-center gap-2 bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-3 rounded-xl">
-              <AlertCircle className="w-4 h-4 shrink-0" />
-              {error}
-            </div>
-          )}
-
-          <form onSubmit={handleSubmit} className="space-y-4">
+          <form onSubmit={handleSubmit} noValidate className="space-y-4">
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-1.5">Email</label>
               <input
@@ -156,6 +161,13 @@ export default function LoginPage() {
           </p>
         </div>
       </div>
+
+      <WarningModal
+        open={warning !== null}
+        onClose={() => setWarning(null)}
+        title={warning?.title}
+        messages={warning?.messages ?? []}
+      />
     </div>
   )
 }

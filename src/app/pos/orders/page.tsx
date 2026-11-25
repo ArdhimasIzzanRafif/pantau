@@ -1,9 +1,11 @@
 "use client"
 
-import { useState, useEffect, useCallback } from "react"
+import { Suspense, useState, useEffect, useCallback } from "react"
 import { useSession } from "next-auth/react"
 import { useSearchParams } from "next/navigation"
 import Link from "next/link"
+import { AppDatePicker } from "@/components/ui/app-date-picker"
+import { OrderMenuSummary, OrderItemDescription, type OrderHistoryItem } from "@/components/order-menu-summary"
 import {
   ArrowLeft,
   Search,
@@ -11,12 +13,10 @@ import {
   X,
   Loader2,
   RefreshCw,
+  ChevronDown,
 } from "lucide-react"
 
-type OrderItem = {
-  id: string
-  name: string
-  qty: number
+type OrderItem = OrderHistoryItem & {
   price: number
   subtotal: number
 }
@@ -55,21 +55,28 @@ function formatRp(amount: number) {
   return "Rp " + Math.round(amount).toLocaleString("id-ID")
 }
 
+function todayDate() {
+  const date = new Date()
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`
+}
+
 const STATUS_COLORS: Record<string, string> = {
   PAID: "bg-green-100 text-green-700",
   OPEN: "bg-yellow-100 text-yellow-700",
+  PENDING_PAYMENT: "bg-blue-100 text-blue-700",
   VOID: "bg-red-100 text-red-600",
-  HELD: "bg-slate-100 text-slate-600",
+  HELD: "bg-blue-100 text-blue-700",
 }
 
 const STATUS_LABELS: Record<string, string> = {
   PAID: "Lunas",
-  OPEN: "Terbuka",
+  OPEN: "Menunggu diproses",
+  PENDING_PAYMENT: "Menunggu pembayaran",
   VOID: "Batal",
-  HELD: "Ditahan",
+  HELD: "Sedang diproses",
 }
 
-export default function POSOrdersPage() {
+function POSOrdersContent() {
   const { data: session } = useSession()
   const searchParams = useSearchParams()
   const sessionUser = session?.user as { role?: string; locationIds?: string[] } | undefined
@@ -80,10 +87,8 @@ export default function POSOrdersPage() {
   const [selectedLocation, setSelectedLocation] = useState<string>(searchParams.get("locationId") ?? "")
   const [loading, setLoading] = useState(false)
   const [search, setSearch] = useState("")
-  const [dateFilter, setDateFilter] = useState(() => {
-    const d = new Date()
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`
-  })
+  const [dateFilter, setDateFilter] = useState(todayDate)
+  const [draftDateFilter, setDraftDateFilter] = useState(todayDate)
 
   const [detailOrder, setDetailOrder] = useState<Order | null>(null)
 
@@ -112,20 +117,22 @@ export default function POSOrdersPage() {
   }, [isKasir, sessionUser?.locationIds?.join(",")])
 
   useEffect(() => {
-    fetchOrders()
+    const timeoutId = window.setTimeout(() => { void fetchOrders() }, 0)
+    return () => window.clearTimeout(timeoutId)
   }, [fetchOrders])
 
   const filtered = orders.filter((o) =>
     o.orderNumber.toLowerCase().includes(search.toLowerCase()) ||
     (o.customerName?.toLowerCase().includes(search.toLowerCase()) ?? false) ||
-    (o.tableNumber?.toLowerCase().includes(search.toLowerCase()) ?? false)
+    (o.tableNumber?.toLowerCase().includes(search.toLowerCase()) ?? false) ||
+    o.items.some(item => item.name.toLowerCase().includes(search.toLowerCase()) || (item.modifiers ?? []).some(modifier => modifier.optionName.toLowerCase().includes(search.toLowerCase())))
   )
 
   const totalSales = orders.filter((o) => o.status === "PAID").reduce((sum, o) => sum + Number(o.total), 0)
   const totalOrders = orders.filter((o) => o.status === "PAID").length
 
   return (
-    <div className="h-screen flex flex-col bg-slate-100">
+    <div className="h-full flex flex-col bg-slate-100">
       <header className="h-14 bg-slate-900 border-b border-slate-700 flex items-center px-4 gap-3 shrink-0">
         <Link
           href="/pos"
@@ -144,35 +151,48 @@ export default function POSOrdersPage() {
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
               <input
                 type="text"
-                placeholder="Cari nomor, nama pelanggan, meja..."
+                placeholder="Cari nomor, pelanggan, meja, menu..."
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
             </div>
             {!isKasir && (
-              <select
-                value={selectedLocation}
-                onChange={(e) => setSelectedLocation(e.target.value)}
-                className="px-4 py-2.5 rounded-xl border border-slate-200 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-              >
-                <option value="">Semua Lokasi</option>
-                {locations.map((l) => (
-                  <option key={l.id} value={l.id}>{l.name}</option>
-                ))}
-              </select>
+              // Safari mengabaikan padding & sudut bulat <select> tanpa appearance-none,
+              // jadi panahnya digambar sendiri supaya sama dengan kolom lain.
+              <div className="relative">
+                <select
+                  value={selectedLocation}
+                  onChange={(e) => setSelectedLocation(e.target.value)}
+                  className="h-11 w-full appearance-none rounded-xl border border-slate-200 bg-white pl-4 pr-10 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="">Semua Lokasi</option>
+                  {locations.map((l) => (
+                    <option key={l.id} value={l.id}>{l.name}</option>
+                  ))}
+                </select>
+                <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+              </div>
             )}
-            <input
-              type="date"
-              value={dateFilter}
-              onChange={(e) => setDateFilter(e.target.value)}
-              className="px-4 py-2.5 rounded-xl border border-slate-200 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+            <AppDatePicker
+              value={draftDateFilter}
+              onChange={setDraftDateFilter}
+              clearable={false}
+              ariaLabel="Tanggal pesanan"
+              className="h-11 rounded-xl border border-slate-200 bg-white px-4 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
             <button
-              onClick={fetchOrders}
-              className="p-2.5 rounded-xl border border-slate-200 hover:bg-slate-50 transition-colors"
+              type="button"
+              onClick={() => {
+                if (draftDateFilter !== dateFilter) setDateFilter(draftDateFilter)
+                else void fetchOrders()
+              }}
+              aria-label="Terapkan tanggal dan muat ulang"
+              title="Terapkan tanggal"
+              className="flex items-center justify-center gap-2 rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-600 transition-colors hover:bg-slate-50"
             >
               <RefreshCw className="w-4 h-4 text-slate-500" />
+              <span className="sm:hidden">Terapkan Tanggal</span>
             </button>
           </div>
         </div>
@@ -222,7 +242,7 @@ export default function POSOrdersPage() {
                     <th className="text-center text-xs font-medium text-slate-500 px-4 py-4">No. Pesanan</th>
                     <th className="text-center text-xs font-medium text-slate-500 px-4 py-4">Waktu</th>
                     <th className="text-center text-xs font-medium text-slate-500 px-4 py-4">Tipe</th>
-                    <th className="text-center text-xs font-medium text-slate-500 px-4 py-4">Item</th>
+                    <th className="text-center text-xs font-medium text-slate-500 px-4 py-4">Menu</th>
                     <th className="text-center text-xs font-medium text-slate-500 px-4 py-4">Total</th>
                     <th className="text-center text-xs font-medium text-slate-500 px-4 py-4">Status</th>
                   </tr>
@@ -250,13 +270,12 @@ export default function POSOrdersPage() {
                             {order.orderType === "DINE_IN" ? "Dine In" : order.orderType === "TAKEAWAY" ? "Takeaway" : "Delivery"}
                           </span>
                           {order.tableNumber && (
-                            <span className="text-xs text-slate-400">Meja {order.tableNumber}</span>
+                            <span className="text-xs text-slate-400">{/^meja\b/i.test(order.tableNumber.trim()) ? order.tableNumber : `Meja ${order.tableNumber}`}</span>
                           )}
                         </div>
                       </td>
                       <td className="px-4 py-4 text-center text-slate-500 text-xs">
-                        {order.items.slice(0, 2).map((i) => `${i.name} ×${i.qty}`).join(", ")}
-                        {order.items.length > 2 && ` +${order.items.length - 2} lagi`}
+                        <OrderMenuSummary items={order.items} />
                       </td>
                       <td className="px-4 py-4 text-center font-semibold text-slate-900">
                         {formatRp(Number(order.total))}
@@ -298,14 +317,14 @@ export default function POSOrdersPage() {
                 </span>
                 <span className="text-slate-500">
                   {detailOrder.orderType === "DINE_IN" ? "Dine In" : detailOrder.orderType === "TAKEAWAY" ? "Takeaway" : "Delivery"}
-                  {detailOrder.tableNumber ? ` · Meja ${detailOrder.tableNumber}` : ""}
+                  {detailOrder.tableNumber ? ` · ${/^meja\b/i.test(detailOrder.tableNumber.trim()) ? detailOrder.tableNumber : `Meja ${detailOrder.tableNumber}`}` : ""}
                 </span>
               </div>
               <div className="space-y-2">
                 {detailOrder.items.map((item) => (
-                  <div key={item.id} className="flex justify-between text-sm">
-                    <span className="text-slate-700">{item.name} <span className="text-slate-400">×{item.qty}</span></span>
-                    <span className="font-medium">{formatRp(Number(item.subtotal))}</span>
+                  <div key={item.id} className="flex items-start justify-between gap-4 py-1 text-sm">
+                    <OrderItemDescription item={item} />
+                    <span className="shrink-0 whitespace-nowrap font-medium tabular-nums">{formatRp(Number(item.subtotal))}</span>
                   </div>
                 ))}
               </div>
@@ -344,5 +363,17 @@ export default function POSOrdersPage() {
         </div>
       )}
     </div>
+  )
+}
+
+export default function POSOrdersPage() {
+  return (
+    <Suspense fallback={(
+      <div className="h-full bg-slate-100 flex items-center justify-center">
+        <Loader2 className="w-6 h-6 text-blue-600 animate-spin" />
+      </div>
+    )}>
+      <POSOrdersContent />
+    </Suspense>
   )
 }

@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/db"
 import { requireAuth, isResponse } from "@/lib/api-helpers"
-import * as XLSX from "xlsx"
+import { createStyledExcelReport } from "@/lib/excel-report"
+import { getHistoryScope } from "@/lib/history-scope"
 
 const STATUS_LABEL: Record<string, string> = {
   PAID: "Lunas", VOID: "Batal", OPEN: "Terbuka",
@@ -26,10 +27,18 @@ export async function GET(req: NextRequest) {
   const to         = searchParams.get("to")
   const locationId = searchParams.get("locationId")
   const type       = searchParams.get("type") ?? "transaction" // "transaction" | "product"
+  const historyScope = await getHistoryScope(user, searchParams.get("history") === "1")
+  if (!historyScope.allowed) {
+    return NextResponse.json({ error: "Tidak memiliki akses ke Riwayat" }, { status: 403 })
+  }
+  if (searchParams.get("history") === "1" && user.role !== "OWNER") {
+    return NextResponse.json({ error: "Riwayat shift hanya dapat dilihat Owner" }, { status: 403 })
+  }
 
   const where: Record<string, unknown> = {
     organizationId: user.organizationId,
     status: "CLOSED",
+    ...(historyScope.actorId && { cashierId: historyScope.actorId }),
   }
   if (locationId) where.locationId = locationId
   if (from || to) {
@@ -47,7 +56,7 @@ export async function GET(req: NextRequest) {
       orders: {
         where: { status: "PAID" },
         include: {
-          items:    { include: { menuItem: { select: { category: true, sku: true } } } },
+          items:    { include: { menuItem: { select: { name: true, category: true, sku: true } } } },
           payments: true,
         },
         orderBy: { createdAt: "asc" },
@@ -106,16 +115,30 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    const ws = XLSX.utils.json_to_sheet(rows)
-    ws["!cols"] = [14,12,10,16,16,16,20,12,14,16,14,12,10,12,14,16,18,12,10,12,10,14,18,14].map((w) => ({ wch: w }))
-    const wb = XLSX.utils.book_new()
-    XLSX.utils.book_append_sheet(wb, ws, "Detail Transaksi")
-    const buf = XLSX.write(wb, { type: "buffer", bookType: "xlsx" })
+    const headers = [
+      "No. Struk", "Tanggal", "Jam", "Nama Outlet", "Nama Kasir", "Nama Pelanggan",
+      "Produk", "Opsi Tambahan", "Jumlah Produk", "Jumlah Dibatalkan", "Harga Per Produk",
+      "Subtotal", "Tipe Harga", "Diskon Produk", "Tipe Diskon Produk", "Diskon Transaksi",
+      "Tipe Diskon Transaksi", "Redeem Poin", "Pajak", "Total", "Status", "Kode Pembayaran",
+      "Metode Pembayaran", "No. Referensi",
+    ]
+    const buf = await createStyledExcelReport({
+      title: "Riwayat Penjualan",
+      sheetName: "Riwayat Penjualan",
+      rows,
+      headers,
+      widths: [14,12,10,16,16,16,20,12,14,16,14,12,10,12,14,16,18,12,10,12,10,14,18,14],
+      currencyHeaders: ["Harga Per Produk", "Subtotal", "Diskon Produk", "Diskon Transaksi", "Redeem Poin", "Pajak", "Total"],
+      integerHeaders: ["Jumlah Produk", "Jumlah Dibatalkan"],
+      centeredHeaders: ["Tanggal", "Jam", "Tipe Harga", "Status", "Kode Pembayaran", "Metode Pembayaran"],
+      reportLayout: true,
+      freezeColumns: 1,
+    })
 
     return new NextResponse(buf, {
       headers: {
         "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        "Content-Disposition": `attachment; filename="detail_transaksi_${rangeLabel}.xlsx"`,
+        "Content-Disposition": `attachment; filename="riwayat_penjualan_${rangeLabel}.xlsx"`,
       },
     })
   }
@@ -173,7 +196,6 @@ export async function GET(req: NextRequest) {
         "Pajak":                 r.pajak,
         "Penjualan Bersih":      r.penjualanBersih,
       })),
-      { "Nama Outlet / Gudang": "", "Jumlah Shift": "", "Jumlah Transaksi": "", "Penjualan Kotor": "", "Pajak": "", "Penjualan Bersih": "" },
       {
         "Nama Outlet / Gudang": "TOTAL",
         "Jumlah Shift":         totShift,
@@ -184,11 +206,16 @@ export async function GET(req: NextRequest) {
       },
     ]
 
-    const ws = XLSX.utils.json_to_sheet(locRows)
-    ws["!cols"] = [24, 14, 16, 18, 12, 18].map((w) => ({ wch: w }))
-    const wb = XLSX.utils.book_new()
-    XLSX.utils.book_append_sheet(wb, ws, "Per Outlet")
-    const buf = XLSX.write(wb, { type: "buffer", bookType: "xlsx" })
+    const headers = ["Nama Outlet / Gudang", "Jumlah Shift", "Jumlah Transaksi", "Penjualan Kotor", "Pajak", "Penjualan Bersih"]
+    const buf = await createStyledExcelReport({
+      title: "Riwayat Penjualan per Outlet",
+      sheetName: "Per Outlet",
+      rows: locRows,
+      headers,
+      widths: [24, 14, 16, 18, 12, 18],
+      currencyHeaders: ["Penjualan Kotor", "Pajak", "Penjualan Bersih"],
+      integerHeaders: ["Jumlah Shift", "Jumlah Transaksi"],
+    })
 
     return new NextResponse(buf, {
       headers: {
@@ -219,7 +246,10 @@ export async function GET(req: NextRequest) {
       for (const item of order.items) {
         const gross    = Number(item.subtotal)
         const itemTax  = Math.round(gross * taxRatio)
-        const existing = productMap.get(item.name)
+        // Kunci per menuItemId, bukan nama — lihat catatan yang sama di
+        // api/dashboard/charts. Menu yang sudah dihapus jatuh balik ke namanya.
+        const key      = item.menuItemId ? `id:${item.menuItemId}` : `name:${item.name}`
+        const existing = productMap.get(key)
 
         if (existing) {
           existing.qty            += Number(item.qty)
@@ -227,8 +257,8 @@ export async function GET(req: NextRequest) {
           existing.pajak          += itemTax
           existing.penjualanBersih = existing.penjualanKotor - existing.pajak
         } else {
-          productMap.set(item.name, {
-            nama:            item.name,
+          productMap.set(key, {
+            nama:            item.menuItem?.name ?? item.name,
             kategori:        item.menuItem?.category ?? "",
             sku:             item.menuItem?.sku ?? "",
             qty:             Number(item.qty),
@@ -248,11 +278,6 @@ export async function GET(req: NextRequest) {
   const totalPajak  = sorted.reduce((s, p) => s + p.pajak, 0)
   const totalBersih = sorted.reduce((s, p) => s + p.penjualanBersih, 0)
 
-  const blankRow = {
-    "Nama Produk": "", "Kategori": "", "Kode Produk (SKU)": "",
-    "Jumlah Terjual (Unit)": "", "Penjualan Kotor": "", "Pajak": "", "Penjualan Bersih": "",
-  }
-
   const productRows = [
     ...sorted.map((p) => ({
       "Nama Produk":           p.nama,
@@ -263,7 +288,6 @@ export async function GET(req: NextRequest) {
       "Pajak":                 p.pajak,
       "Penjualan Bersih":      p.penjualanBersih,
     })),
-    blankRow,
     {
       "Nama Produk":           "TOTAL",
       "Kategori":              "",
@@ -275,16 +299,24 @@ export async function GET(req: NextRequest) {
     },
   ]
 
-  const ws = XLSX.utils.json_to_sheet(productRows)
-  ws["!cols"] = [28, 16, 16, 20, 18, 12, 18].map((w) => ({ wch: w }))
-  const wb = XLSX.utils.book_new()
-  XLSX.utils.book_append_sheet(wb, ws, "Per Produk")
-  const buf = XLSX.write(wb, { type: "buffer", bookType: "xlsx" })
+  const headers = ["Nama Produk", "Kategori", "Kode Produk (SKU)", "Jumlah Terjual (Unit)", "Penjualan Kotor", "Pajak", "Penjualan Bersih"]
+  const buf = await createStyledExcelReport({
+    title: "Riwayat Penjualan per Produk",
+    sheetName: "Penjualan per Produk",
+    rows: productRows,
+    headers,
+    widths: [28, 16, 16, 20, 18, 12, 18],
+    currencyHeaders: ["Penjualan Kotor", "Pajak", "Penjualan Bersih"],
+    integerHeaders: ["Jumlah Terjual (Unit)"],
+    centeredHeaders: ["Kategori", "Kode Produk (SKU)"],
+    reportLayout: true,
+    freezeColumns: 1,
+  })
 
   return new NextResponse(buf, {
     headers: {
       "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-      "Content-Disposition": `attachment; filename="per_produk_${rangeLabel}.xlsx"`,
+      "Content-Disposition": `attachment; filename="riwayat_penjualan_per_produk_${rangeLabel}.xlsx"`,
     },
   })
 }

@@ -9,46 +9,72 @@ datasource db {
 // ─── TENANT ───────────────────────────────────────────────────────────────────
 
 model Organization {
-  id        String   @id @default(cuid())
-  name      String
-  slug      String   @unique
-  logoUrl      String?
-  qrisImageUrl String?
-  qrisPayload  String?
+  id                   String    @id @default(cuid())
+  name                 String
+  slug                 String    @unique
+  logoUrl              String?
+  qrisImageUrl         String?
+  qrisPayload          String?
   ownerPhone           String?
   receiptLogoUrl       String?
   receiptWifiName      String?
   receiptWifiPassword  String?
   receiptFooterText    String?
-  midtransServerKey    String?
-  midtransClientKey    String?
-  midtransProduction   Boolean @default(false)
-  rolePermissions Json?
-  orderCounter    Int        @default(0)
-  plan         Plan       @default(FREE)
-  status       OrgStatus  @default(TRIAL)
-  trialEndsAt  DateTime?
-  lastActiveAt DateTime?
-  suspendedAt  DateTime?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  rolePermissions      Json?
+  /// Berapa lama stok boleh ditahan reservasi sebelum ditandai terlambat.
+  reservationHoldHours Int       @default(48)
+  orderCounter         Int       @default(0)
+  plan                 Plan      @default(FREE)
+  status               OrgStatus @default(TRIAL)
+  trialEndsAt          DateTime?
+  lastActiveAt         DateTime?
+  suspendedAt          DateTime?
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
 
-  users             OrganizationUser[]
-  locations         Location[]
-  inventoryItems    InventoryItem[]
-  inventorySettings InventoryLocationSetting[]
-  stockBalances     StockBalance[]
-  stockMovements    StockMovement[]
-  stockTransfers    StockTransfer[]
-  goodsReceipts     GoodsReceipt[]
-  stockOpnames      StockOpname[]
-  alerts            Alert[]
-  auditLogs         AuditLog[]
-  posShifts         POSShift[]
-  posOrders         POSOrder[]
-  modifierGroups    MenuModifierGroup[]
-  discountRules     DiscountRule[]
-  tables            Table[]
+  users                       OrganizationUser[]
+  locations                   Location[]
+  inventoryItems              InventoryItem[]
+  inventorySettings           InventoryLocationSetting[]
+  stockBalances               StockBalance[]
+  stockMovements              StockMovement[]
+  stockBatches                StockBatch[]
+  stockAdjustments            StockAdjustment[]
+  stockTransfers              StockTransfer[]
+  goodsReceipts               GoodsReceipt[]
+  suppliers                   Supplier[]
+  stockOpnames                StockOpname[]
+  alerts                      Alert[]
+  auditLogs                   AuditLog[]
+  posShifts                   POSShift[]
+  posOrders                   POSOrder[]
+  modifierGroups              MenuModifierGroup[]
+  discountRules               DiscountRule[]
+  tables                      Table[]
+  itemSuppliers               ItemSupplier[]
+  purchaseRequests            PurchaseRequest[]
+  purchaseOrders              PurchaseOrder[]
+  incomingWhatsAppMessages    IncomingWhatsAppMessage[]
+  supplierPhones              SupplierPhone[]
+  purchaseOrderDocuments      PurchaseOrderDocument[]
+  supplierMessageStatusEvents SupplierMessageStatusEvent[]
+  whatsappIntegration         OrganizationWhatsApp?
+  whatsAppOutbox              WhatsAppOutbox[]
+  stockReservations           StockReservation[]
+  productionRecipes           ProductionRecipe[]
+  productions                 InventoryProduction[]
+}
+
+model OrganizationWhatsApp {
+  organizationId         String    @id
+  encryptedToken         String
+  encryptedWebhookSecret String?
+  senderPhone            String    @unique
+  webhookConfiguredAt    DateTime?
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 }
 
 enum Plan {
@@ -82,8 +108,8 @@ model User {
   organizations      OrganizationUser[]
   accounts           Account[]
   sessions           Session[]
-  posShiftsAsCashier POSShift[] @relation("ShiftCashier")
-  posOrdersAsCashier POSOrder[] @relation("OrderCashier")
+  posShiftsAsCashier POSShift[]         @relation("ShiftCashier")
+  posOrdersAsCashier POSOrder[]         @relation("OrderCashier")
 }
 
 model OrganizationUser {
@@ -93,8 +119,8 @@ model OrganizationUser {
   role           Role
   createdAt      DateTime @default(now())
 
-  organization      Organization              @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  user              User                      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organization      Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user              User           @relation(fields: [userId], references: [id], onDelete: Cascade)
   assignedLocations UserLocation[]
 
   @@unique([organizationId, userId])
@@ -103,8 +129,8 @@ model OrganizationUser {
 }
 
 model UserLocation {
-  id        String @id @default(cuid())
-  orgUserId String
+  id         String @id @default(cuid())
+  orgUserId  String
   locationId String
 
   orgUser  OrganizationUser @relation(fields: [orgUserId], references: [id], onDelete: Cascade)
@@ -118,7 +144,6 @@ enum Role {
   OWNER
   ADMIN_GUDANG
   SUPERVISOR
-  EMPLOYEE
   KASIR
 }
 
@@ -165,29 +190,43 @@ model VerificationToken {
 // ─── LOCATION ─────────────────────────────────────────────────────────────────
 
 model Location {
-  id             String       @id @default(cuid())
-  organizationId String
-  name           String
-  type           LocationType
-  address        String?
-  isActive       Boolean      @default(true)
-  createdAt      DateTime     @default(now())
-  updatedAt      DateTime     @updatedAt
+  id                     String       @id @default(cuid())
+  organizationId         String
+  name                   String
+  type                   LocationType
+  address                String?
+  whatsappPhone          String?
+  fulfillmentWarehouseId String?
+  isActive               Boolean      @default(true)
+  createdAt              DateTime     @default(now())
+  updatedAt              DateTime     @updatedAt
 
-  organization      Organization               @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  stockBalances     StockBalance[]
-  inventorySettings InventoryLocationSetting[]
-  transfersFrom     StockTransfer[]            @relation("TransferFrom")
-  transfersTo       StockTransfer[]            @relation("TransferTo")
-  goodsReceipts     GoodsReceipt[]
-  opnames           StockOpname[]
-  menuToken         String       @unique @default(cuid())
-  posShifts         POSShift[]
-  posOrders         POSOrder[]
-  assignedUsers     UserLocation[]
-  tables            Table[]
+  organization         Organization               @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  fulfillmentWarehouse Location?                  @relation("OutletFulfillmentWarehouse", fields: [fulfillmentWarehouseId], references: [id], onDelete: SetNull)
+  servedOutlets        Location[]                 @relation("OutletFulfillmentWarehouse")
+  stockBalances        StockBalance[]
+  stockMovements       StockMovement[]
+  stockBatches         StockBatch[]
+  stockAdjustments     StockAdjustment[]
+  inventorySettings    InventoryLocationSetting[]
+  transfersFrom        StockTransfer[]            @relation("TransferFrom")
+  transfersTo          StockTransfer[]            @relation("TransferTo")
+  goodsReceipts        GoodsReceipt[]
+  opnames              StockOpname[]
+  menuToken            String                     @unique @default(cuid())
+  posShifts            POSShift[]
+  posOrders            POSOrder[]
+  assignedUsers        UserLocation[]
+  tables               Table[]
+  discountRules        DiscountRuleLocation[]
+  itemSuppliers        ItemSupplier[]
+  purchaseRequests     PurchaseRequest[]
+  purchaseOrders       PurchaseOrder[]
+  stockReservations    StockReservation[]
+  productions          InventoryProduction[]
 
   @@index([organizationId])
+  @@index([fulfillmentWarehouseId])
 }
 
 enum LocationType {
@@ -198,30 +237,36 @@ enum LocationType {
 // ─── INVENTORY ────────────────────────────────────────────────────────────────
 
 model InventoryItem {
-  id             String   @id @default(cuid())
-  organizationId String
-  name           String
-  sku            String?
-  category       String?
-  unit           String   @default("pcs")
-  packSize       Int?
-  packUnit       String?
-  costPrice      Decimal? @db.Decimal(15, 2)
-  sellPrice      Decimal? @db.Decimal(15, 2)
-  minStock       Int?
+  id               String   @id @default(cuid())
+  organizationId   String
+  name             String
+  sku              String?
+  category         String?
+  /// Satuan DASAR bahan ini. Seluruh stok, ambang, dan reservasi memakai
+  /// satuan ini, apa pun satuan yang diketik pengguna.
+  unit             String   @default("pcs")
+  /// Berapa satuan dasar dalam satu satuan kemasan. Desimal, bukan bilangan
+  /// bulat, karena ada konversi seperti 1 botol = 0,75 liter.
+  packSize         Decimal? @db.Decimal(15, 4)
+  packUnit         String?
+  costPrice        Decimal? @db.Decimal(15, 6)
+  sellPrice        Decimal? @db.Decimal(15, 2)
+  minStock         Decimal? @db.Decimal(15, 3)
   isTrackable      Boolean  @default(true)
   isMenuItem       Boolean  @default(false)
   isActive         Boolean  @default(true)
   isAvailableForQr Boolean  @default(true)
-  description    String?
-  imageUrl       String?
-  notes          String?
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  description      String?
+  imageUrl         String?
+  notes            String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
 
   organization     Organization               @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   stockBalances    StockBalance[]
   stockMovements   StockMovement[]
+  stockBatches     StockBatch[]
+  stockAdjustments StockAdjustment[]
   transferItems    StockTransferItem[]
   receiptItems     GoodsReceiptItem[]
   opnameItems      StockOpnameItem[]
@@ -230,6 +275,14 @@ model InventoryItem {
   usedInRecipes    RecipeItem[]               @relation("ChildItem")
   posOrderItems    POSOrderItem[]
   modifierGroups   InventoryItemModifier[]
+  modifierRecipes  ModifierRecipeItem[]
+  discountRules    DiscountRuleItem[]
+  itemSuppliers    ItemSupplier[]
+  purchaseRequests PurchaseRequest[]
+  reservations     StockReservation[]
+  productionRecipe ProductionRecipe?        @relation("ProductionOutput")
+  productionInputs ProductionIngredient[]   @relation("ProductionInput")
+  productions      InventoryProduction[]
 
   @@unique([organizationId, sku])
   @@index([organizationId])
@@ -240,7 +293,7 @@ model InventoryLocationSetting {
   organizationId String
   itemId         String
   locationId     String
-  minStock       Int?
+  minStock       Decimal? @db.Decimal(15, 3)
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
@@ -280,13 +333,19 @@ model StockMovement {
   note           String?
   referenceId    String?
   createdById    String?
+  batchId        String?
+  affectsBalance Boolean      @default(true)
+  effectiveAt    DateTime     @default(now())
   createdAt      DateTime     @default(now())
 
   organization Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   item         InventoryItem @relation(fields: [itemId], references: [id])
+  location     Location      @relation(fields: [locationId], references: [id])
+  batch        StockBatch?   @relation(fields: [batchId], references: [id], onDelete: SetNull)
 
-  @@index([organizationId, itemId, createdAt])
-  @@index([organizationId, locationId, createdAt])
+  @@index([organizationId, itemId, effectiveAt])
+  @@index([organizationId, locationId, effectiveAt])
+  @@index([batchId])
 }
 
 enum MovementType {
@@ -294,34 +353,479 @@ enum MovementType {
   GOODS_OUT
   TRANSFER_OUT
   TRANSFER_IN
+  TRANSFER_RETURN
+  TRANSFER_VARIANCE
   OPNAME_CORRECTION
   WASTE
   DAMAGE
+  LOSS
+  COMPLIMENTARY
+  EXPIRED
   INITIAL_STOCK
   POS_SALE
+  PRODUCTION_IN
+  PRODUCTION_OUT
+}
+
+// Resep produksi terpisah dari resep menu: POS hanya mengurangi hasil olahan.
+model ProductionRecipe {
+  id             String   @id @default(cuid())
+  organizationId String
+  outputItemId   String   @unique
+  yieldQuantity  Decimal  @db.Decimal(15, 3)
+  weightPerPiece Decimal? @db.Decimal(15, 3)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization           @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  outputItem   InventoryItem          @relation("ProductionOutput", fields: [outputItemId], references: [id])
+  ingredients  ProductionIngredient[]
+  productions  InventoryProduction[]
+
+  @@index([organizationId])
+}
+
+model ProductionIngredient {
+  id           String  @id @default(cuid())
+  recipeId     String
+  itemId       String
+  quantity     Decimal @db.Decimal(15, 3)
+
+  recipe ProductionRecipe @relation(fields: [recipeId], references: [id], onDelete: Cascade)
+  item   InventoryItem    @relation("ProductionInput", fields: [itemId], references: [id])
+
+  @@unique([recipeId, itemId])
+}
+
+model InventoryProduction {
+  id             String   @id @default(cuid())
+  organizationId String
+  recipeId       String
+  outputItemId   String
+  locationId     String
+  requestId      String
+  quantity       Decimal  @db.Decimal(15, 3)
+  totalCost      Decimal  @db.Decimal(15, 6)
+  unitCost       Decimal  @db.Decimal(15, 6)
+  ingredients    Json
+  outputName     String
+  outputUnit     String
+  weightPerPiece Decimal? @db.Decimal(15, 3)
+  note           String?
+  createdById    String
+  createdAt      DateTime @default(now())
+
+  organization Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  recipe       ProductionRecipe @relation(fields: [recipeId], references: [id])
+  outputItem   InventoryItem    @relation(fields: [outputItemId], references: [id])
+  location     Location         @relation(fields: [locationId], references: [id])
+
+  @@unique([organizationId, requestId])
+  @@index([organizationId, createdAt])
+}
+
+model StockBatch {
+  id              String    @id @default(cuid())
+  organizationId  String
+  itemId          String
+  locationId      String
+  batchNumber     String
+  expiryDate      DateTime?
+  receivedAt      DateTime  @default(now())
+  initialQuantity Decimal   @db.Decimal(15, 3)
+  quantity        Decimal   @db.Decimal(15, 3)
+  costPrice       Decimal?  @db.Decimal(15, 6)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  organization    Organization                   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  item            InventoryItem                  @relation(fields: [itemId], references: [id])
+  location        Location                       @relation(fields: [locationId], references: [id])
+  receiptItems    GoodsReceiptItem[]
+  movements       StockMovement[]
+  adjustments     StockAdjustment[]
+  transferSources StockTransferBatchAllocation[] @relation("TransferSourceBatch")
+
+  @@unique([organizationId, itemId, locationId, batchNumber])
+  @@index([organizationId, locationId, expiryDate])
+  @@index([organizationId, itemId, quantity])
+}
+
+model StockAdjustment {
+  id             String         @id @default(cuid())
+  organizationId String
+  locationId     String
+  itemId         String
+  type           AdjustmentType
+  quantity       Decimal        @db.Decimal(15, 3)
+  unitCost       Decimal?       @db.Decimal(15, 2)
+  totalCost      Decimal?       @db.Decimal(15, 2)
+  note           String
+  evidenceUrl    String?
+  batchId        String?
+  createdById    String?
+  createdAt      DateTime       @default(now())
+
+  organization Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  location     Location      @relation(fields: [locationId], references: [id])
+  item         InventoryItem @relation(fields: [itemId], references: [id])
+  batch        StockBatch?   @relation(fields: [batchId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId, locationId, createdAt])
+  @@index([organizationId, itemId, createdAt])
+  @@index([batchId])
+}
+
+enum AdjustmentType {
+  WASTE
+  DAMAGE
+  LOSS
+  COMPLIMENTARY
+  EXPIRED
 }
 
 // ─── GOODS RECEIPT (barang masuk) ────────────────────────────────────────────
 
 model GoodsReceipt {
-  id             String             @id @default(cuid())
-  organizationId String
-  locationId     String
-  receiptNumber  String?
-  supplier       String?
-  notes          String?
-  status         GoodsReceiptStatus @default(DRAFT)
-  imageUrl       String?
-  receivedAt     DateTime           @default(now())
-  createdById    String?
-  createdAt      DateTime           @default(now())
-  updatedAt      DateTime           @updatedAt
+  id                String             @id @default(cuid())
+  organizationId    String
+  locationId        String
+  supplierId        String?
+  receiptNumber     String?
+  supplier          String?
+  notes             String?
+  status            GoodsReceiptStatus @default(DRAFT)
+  imageUrl          String?
+  receivedAt        DateTime           @default(now())
+  createdById       String?
+  purchaseRequestId String?
+  purchaseOrderId   String?
+  clientRequestId   String?            @unique
+  /// Barang pesanan diterima sebelum supplier mengonfirmasi (jalur darurat).
+  withoutConfirmationReason String?
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
 
-  organization Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  location     Location           @relation(fields: [locationId], references: [id])
-  items        GoodsReceiptItem[]
+  organization    Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  location        Location           @relation(fields: [locationId], references: [id])
+  supplierRecord  Supplier?          @relation(fields: [supplierId], references: [id], onDelete: SetNull)
+  purchaseRequest PurchaseRequest?   @relation(fields: [purchaseRequestId], references: [id], onDelete: SetNull)
+  purchaseOrder   PurchaseOrder?     @relation(fields: [purchaseOrderId], references: [id], onDelete: SetNull)
+  items           GoodsReceiptItem[]
 
   @@index([organizationId, locationId])
+  @@index([organizationId, supplierId])
+  @@index([purchaseRequestId])
+  @@index([purchaseOrderId])
+}
+
+model Supplier {
+  id                           String   @id @default(cuid())
+  organizationId               String
+  name                         String
+  contactPerson                String?
+  phone                        String?
+  normalizedPhone              String?
+  email                        String?
+  address                      String?
+  notes                        String?
+  responseTimeoutMinutes       Int      @default(120)
+  urgentResponseTimeoutMinutes Int      @default(30)
+  isActive                     Boolean  @default(true)
+  createdAt                    DateTime @default(now())
+  updatedAt                    DateTime @updatedAt
+
+  organization             Organization              @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  goodsReceipts            GoodsReceipt[]
+  itemSuppliers            ItemSupplier[]
+  purchaseRequests         PurchaseRequest[]
+  purchaseOrders           PurchaseOrder[]
+  incomingWhatsAppMessages IncomingWhatsAppMessage[]
+  /// Nomor WA tambahan (mis. admin supplier). Balasan dari nomor ini dianggap dari supplier.
+  extraPhones              SupplierPhone[]
+
+  @@unique([organizationId, name])
+  @@unique([organizationId, normalizedPhone])
+  @@index([organizationId, isActive])
+}
+
+model ItemSupplier {
+  id               String   @id @default(cuid())
+  organizationId   String
+  itemId           String
+  locationId       String
+  supplierId       String
+  priority         Int      @default(1)
+  /// Nama bahan seperti yang dikenal supplier ("keju slice"). Kosong = nama di Pantau.
+  supplierItemName String?
+  /// Satuan beli ke supplier ("dus") dan isinya dalam satuan dasar bahan
+  /// (1 dus = 100 pcs). Kosong = memesan dalam satuan dasar.
+  purchaseUnit     String?
+  purchaseUnitSize Decimal? @db.Decimal(15, 4)
+  createdAt        DateTime @default(now())
+
+  organization Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  item         InventoryItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  location     Location      @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  supplier     Supplier      @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+
+  @@unique([itemId, locationId, supplierId])
+  @@unique([itemId, locationId, priority])
+  @@index([organizationId, itemId, locationId, priority])
+}
+
+/// Kepala pesanan ke satu supplier untuk satu gudang, berisi banyak bahan.
+/// Setiap bahan adalah satu PurchaseRequest (baris) dengan purchaseOrderId ini,
+/// sehingga aturan per bahan (penerimaan, eskalasi, kebutuhan beli) tetap sama.
+/// Satu WA pesanan dikirim per kepala pesanan; status WA disalin ke barisnya.
+model PurchaseOrder {
+  id             String                 @id @default(cuid())
+  organizationId String
+  supplierId     String
+  locationId     String
+  /// Kode pendek di WA, mis. "DBE6". Unik per organisasi.
+  shortCode      String
+  message        String
+  urgency        PurchaseRequestUrgency @default(NORMAL)
+  notes          String?
+  createdById    String?
+  createdAt      DateTime               @default(now())
+  /// Dipesan di luar Pantau (mis. lewat WA pribadi owner); tidak ada WA dikirim.
+  isManual            Boolean   @default(false)
+  /// Dikonfirmasi manusia (mis. supplier konfirmasi lewat telepon).
+  manualConfirmedAt   DateTime?
+  manualConfirmedById String?
+  manualConfirmNote   String?
+  /// Balasan otomatis "format belum terbaca" hanya sekali per pesanan.
+  autoReplySentAt     DateTime?
+  /// WA "perlu dicek" ke penanggung jawab gudang terakhir dikirim (dibatasi).
+  reviewNoticeAt      DateTime?
+
+  organization     Organization              @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  supplier         Supplier                  @relation(fields: [supplierId], references: [id])
+  location         Location                  @relation(fields: [locationId], references: [id])
+  lines            PurchaseRequest[]
+  goodsReceipts    GoodsReceipt[]
+  documents        PurchaseOrderDocument[]
+  incomingMessages IncomingWhatsAppMessage[]
+
+  @@unique([organizationId, shortCode])
+  @@index([organizationId, createdAt])
+  @@index([supplierId])
+}
+
+model PurchaseRequest {
+  id                      String                        @id @default(cuid())
+  organizationId          String
+  itemId                  String
+  locationId              String
+  supplierId              String
+  priority                Int
+  quantity                Decimal                       @db.Decimal(15, 3)
+  receivedQuantity        Decimal                       @default(0) @db.Decimal(15, 3)
+  message                 String
+  status                  PurchaseRequestStatus         @default(ACTIVE)
+  messageStatus           WhatsAppDeliveryStatus        @default(PENDING)
+  messageAttempts         Int                           @default(0)
+  lastMessageError        String?
+  providerMessageId       String?
+  messageSentAt           DateTime?
+  lastMessageAt           DateTime?
+  providerDeliveryStatus  SupplierMessageDeliveryStatus @default(UNKNOWN)
+  providerStatusRaw       String?
+  providerStateRaw        String?
+  providerStateId         String?
+  deliveryStatusUpdatedAt DateTime?
+  deliveredAt             DateTime?
+  readAt                  DateTime?
+  undeliveredAt           DateTime?
+  urgency                 PurchaseRequestUrgency        @default(NORMAL)
+  responseTimeoutMinutes  Int                           @default(120)
+  responseDueAt           DateTime?
+  responseOverdueAt       DateTime?
+  reminderCount           Int                           @default(0)
+  lastReminderAt          DateTime?
+  lastReminderStatus      WhatsAppDeliveryStatus?
+  lastReminderError       String?
+  createdAt               DateTime                      @default(now())
+  resolvedAt              DateTime?
+  resolvedById            String?
+  resolutionNote          String?
+  escalatedFromId         String?                       @unique
+  procurementChainId      String?
+  orderCode               String                        @unique
+  supplierReplyStatus     SupplierReplyStatus           @default(WAITING)
+  inputQuantity           Decimal?                      @db.Decimal(15, 3)
+  inputUnit               String?
+  conversionFactor        Decimal?                      @db.Decimal(15, 4)
+  baseUnit                String?
+  promisedQuantity        Decimal?                      @db.Decimal(15, 3)
+  shippedQuantity         Decimal?                      @db.Decimal(15, 3)
+  supplierLastMessage     String?
+  supplierLastMessageAt   DateTime?
+  supplierConfirmedAt     DateTime?
+  supplierShippedAt       DateTime?
+  /// Pesanan banyak bahan tempat baris ini berada. Kosong = pesanan lama
+  /// berisi satu bahan (dan hasil eskalasi), yang dikirim sendiri.
+  purchaseOrderId         String?
+
+  organization        Organization                 @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  item                InventoryItem                @relation(fields: [itemId], references: [id])
+  location            Location                     @relation(fields: [locationId], references: [id])
+  supplier            Supplier                     @relation(fields: [supplierId], references: [id])
+  purchaseOrder       PurchaseOrder?               @relation(fields: [purchaseOrderId], references: [id], onDelete: SetNull)
+  escalatedFrom       PurchaseRequest?             @relation("EskalasiPengadaan", fields: [escalatedFromId], references: [id], onDelete: SetNull)
+  escalatedTo         PurchaseRequest?             @relation("EskalasiPengadaan")
+  goodsReceipts       GoodsReceipt[]
+  incomingMessages    IncomingWhatsAppMessage[]
+  messageStatusEvents SupplierMessageStatusEvent[]
+
+  @@index([organizationId, itemId, locationId, status])
+  @@index([organizationId, messageStatus, createdAt])
+  @@index([organizationId, providerDeliveryStatus, responseDueAt])
+  @@index([purchaseOrderId])
+}
+
+model SupplierMessageStatusEvent {
+  id                String                        @id @default(cuid())
+  organizationId    String
+  purchaseRequestId String
+  eventKey          String                        @unique
+  providerMessageId String?
+  providerStateId   String?
+  providerStatus    String?
+  providerState     String?
+  mappedStatus      SupplierMessageDeliveryStatus
+  occurredAt        DateTime
+  receivedAt        DateTime                      @default(now())
+  payload           Json
+
+  organization    Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  purchaseRequest PurchaseRequest @relation(fields: [purchaseRequestId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, providerMessageId])
+  @@index([organizationId, providerStateId])
+  @@index([purchaseRequestId, occurredAt])
+}
+
+model IncomingWhatsAppMessage {
+  id                String                @id @default(cuid())
+  organizationId    String
+  purchaseRequestId String?
+  supplierId        String?
+  eventKey          String                @unique
+  providerInboxId   String?
+  devicePhone       String
+  senderPhone       String
+  senderName        String?
+  message           String
+  receivedAt        DateTime
+  processingStatus  IncomingMessageStatus @default(RECEIVED)
+  processingNote    String?
+  createdAt         DateTime              @default(now())
+  /// Pesanan banyak bahan yang dituju pesan ini (bila diketahui).
+  purchaseOrderId   String?
+  /// Jenis isi menurut pembaca: STANDAR, SEBUT_BAHAN, BAYAR, TANYA, BASA_BASI, LAMPIRAN, TAK_DIKENAL.
+  kind              String?
+  /// Lampiran dari Fonnte (bila paketnya mengirim file).
+  attachmentUrl     String?
+  attachmentName    String?
+  /// Usulan sistem untuk ditinjau manusia (tombol satu klik).
+  suggestion        Json?
+  reviewedById      String?
+  reviewedAt        DateTime?
+  reviewAction      String?
+
+  organization    Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  purchaseRequest PurchaseRequest? @relation(fields: [purchaseRequestId], references: [id], onDelete: SetNull)
+  supplier        Supplier?        @relation(fields: [supplierId], references: [id], onDelete: SetNull)
+  purchaseOrder   PurchaseOrder?   @relation(fields: [purchaseOrderId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId, processingStatus])
+  @@index([purchaseOrderId, receivedAt])
+  @@index([organizationId, receivedAt])
+  @@index([purchaseRequestId, receivedAt])
+  @@index([senderPhone, receivedAt])
+}
+
+model WhatsAppOutbox {
+  id                String                 @id @default(cuid())
+  organizationId    String
+  aggregateType     WhatsAppAggregateType
+  aggregateId       String
+  targetPhone       String
+  message           String
+  idempotencyKey    String                 @unique
+  status            WhatsAppDeliveryStatus @default(PENDING)
+  attempts          Int                    @default(0)
+  maxAttempts       Int                    @default(4)
+  nextAttemptAt     DateTime               @default(now())
+  lockedAt          DateTime?
+  sendStartedAt     DateTime?
+  providerMessageId String?
+  lastError         String?
+  sentAt            DateTime?
+  createdAt         DateTime               @default(now())
+  updatedAt         DateTime               @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([status, nextAttemptAt])
+  @@index([organizationId, aggregateType, aggregateId])
+}
+
+enum PurchaseRequestStatus {
+  ACTIVE
+  FULFILLED
+  FAILED
+  CANCELLED
+}
+
+enum PurchaseRequestUrgency {
+  NORMAL
+  URGENT
+}
+
+enum SupplierReplyStatus {
+  WAITING
+  READY
+  PARTIAL
+  SHIPPED
+  UNAVAILABLE
+  NEEDS_REVIEW
+}
+
+enum WhatsAppDeliveryStatus {
+  PENDING
+  PROCESSING
+  SENT
+  FAILED
+  UNCERTAIN
+  DEAD
+}
+
+enum SupplierMessageDeliveryStatus {
+  UNKNOWN
+  PROVIDER_ACCEPTED
+  WHATSAPP_SENT
+  DELIVERED
+  READ
+  UNDELIVERED
+}
+
+enum IncomingMessageStatus {
+  RECEIVED
+  MATCHED
+  NEEDS_REVIEW
+  REJECTED
+  CLOSED
+}
+
+enum WhatsAppAggregateType {
+  PURCHASE_REQUEST
+  PURCHASE_ORDER
+  PURCHASE_REMINDER
+  STOCK_TRANSFER
 }
 
 enum GoodsReceiptStatus {
@@ -330,61 +834,170 @@ enum GoodsReceiptStatus {
 }
 
 model GoodsReceiptItem {
-  id        String   @id @default(cuid())
-  receiptId String
-  itemId    String
-  quantity  Decimal  @db.Decimal(15, 3)
-  costPrice Decimal? @db.Decimal(15, 2)
+  id               String    @id @default(cuid())
+  receiptId        String
+  itemId           String
+  quantity         Decimal   @db.Decimal(15, 3)
+  damagedQuantity  Decimal   @default(0) @db.Decimal(15, 3)
+  missingQuantity  Decimal   @default(0) @db.Decimal(15, 3)
+  costPrice        Decimal?  @db.Decimal(15, 6)
+  purchaseQuantity Decimal   @db.Decimal(15, 3)
+  purchaseUnit     String
+  purchaseUnitCost Decimal?  @db.Decimal(15, 2)
+  lineTotal        Decimal?  @db.Decimal(15, 2)
+  packSizeSnapshot Decimal? @db.Decimal(15, 4)
+  batchNumber      String?
+  expiryDate       DateTime?
+  batchId          String?
 
   receipt GoodsReceipt  @relation(fields: [receiptId], references: [id], onDelete: Cascade)
   item    InventoryItem @relation(fields: [itemId], references: [id])
+  batch   StockBatch?   @relation(fields: [batchId], references: [id], onDelete: SetNull)
 
   @@index([receiptId])
   @@index([itemId])
+  @@index([batchId])
 }
 
 // ─── STOCK TRANSFER (gudang → outlet) ────────────────────────────────────────
 
 model StockTransfer {
-  id             String         @id @default(cuid())
-  organizationId String
-  fromLocationId String
-  toLocationId   String
-  status         TransferStatus @default(PENDING)
-  notes          String?
-  sentAt         DateTime?
-  receivedAt     DateTime?
-  createdById    String?
-  confirmedById  String?
-  receiptImageUrl String?
-  createdAt      DateTime       @default(now())
-  updatedAt      DateTime       @updatedAt
+  id                    String                  @id @default(cuid())
+  organizationId        String
+  fromLocationId        String
+  toLocationId          String
+  status                TransferStatus          @default(PENDING)
+  notes                 String?
+  sentAt                DateTime?
+  receivedAt            DateTime?
+  createdById           String?
+  approvedById          String?
+  approvedAt            DateTime?
+  approvalNotes         String?
+  confirmedById         String?
+  receiptImageUrl       String?
+  receiptNotes          String?
+  varianceResolution    String?
+  autoReplenishment     Boolean                 @default(false)
+  outletRequested       Boolean                 @default(false)
+  // A rejected, unsubmitted need has no order quantity; snapshot prevents
+  // reappearing until its outlet balance, threshold, or warehouse changes.
+  needRejectionSnapshot Json?
+  notificationStatus    WhatsAppDeliveryStatus?
+  notificationAttempts  Int                     @default(0)
+  notificationError     String?
+  notificationSentAt    DateTime?
+  notificationLastAt    DateTime?
+  notificationMessageId String?
+  createdAt             DateTime                @default(now())
+  updatedAt             DateTime                @updatedAt
 
   organization Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   fromLocation Location            @relation("TransferFrom", fields: [fromLocationId], references: [id])
   toLocation   Location            @relation("TransferTo", fields: [toLocationId], references: [id])
   items        StockTransferItem[]
+  reservations StockReservation[]
 
   @@index([organizationId, status])
   @@index([toLocationId, status])
+  @@index([organizationId, notificationStatus, createdAt])
 }
 
+/// PENDING  = outlet meminta, gudang belum memutuskan
+/// APPROVED = gudang menyetujui dan stoknya DIRESERVASI, belum berkurang
+/// SENT     = barang berangkat, stok gudang berkurang, reservasi dipakai
+/// RECEIVED = outlet menerima
+/// REJECTED = ditolak atau dibatalkan; reservasi dilepas
 enum TransferStatus {
   PENDING
+  APPROVED
   SENT
   RECEIVED
   REJECTED
 }
 
-model StockTransferItem {
-  id          String   @id @default(cuid())
-  transferId  String
-  itemId      String
-  quantity    Decimal  @db.Decimal(15, 3)
-  receivedQty Decimal? @db.Decimal(15, 3)
+enum ReservationStatus {
+  ACTIVE
+  CONSUMED
+  RELEASED
+}
 
-  transfer StockTransfer @relation(fields: [transferId], references: [id], onDelete: Cascade)
-  item     InventoryItem @relation(fields: [itemId], references: [id])
+model StockReservation {
+  id                  String            @id @default(cuid())
+  organizationId      String
+  locationId          String
+  itemId              String
+  stockTransferId     String
+  /// Unik: satu baris transfer hanya boleh punya satu reservasi. Ini yang
+  /// membuat klik persetujuan ganda tidak dapat menghasilkan dua alokasi.
+  stockTransferItemId String            @unique
+  quantity            Decimal           @db.Decimal(15, 3)
+  status              ReservationStatus @default(ACTIVE)
+  /// Batas waktu barang seharusnya sudah dikirim. Lewat dari ini, reservasinya
+  /// ditandai TERLAMBAT di tampilan. Tidak pernah dilepas otomatis: stok yang
+  /// sudah dijanjikan hanya boleh dilepas lewat keputusan manusia.
+  expiresAt           DateTime
+  createdAt           DateTime          @default(now())
+  consumedAt          DateTime?
+  releasedAt          DateTime?
+
+  organization Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  location     Location          @relation(fields: [locationId], references: [id])
+  item         InventoryItem     @relation(fields: [itemId], references: [id])
+  transfer     StockTransfer     @relation(fields: [stockTransferId], references: [id], onDelete: Cascade)
+  transferItem StockTransferItem @relation(fields: [stockTransferItemId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, locationId, itemId, status])
+  @@index([stockTransferId])
+}
+
+model StockTransferItem {
+  id                      String   @id @default(cuid())
+  transferId              String
+  itemId                  String
+  quantity                Decimal  @db.Decimal(15, 3)
+  receivedQty             Decimal? @db.Decimal(15, 3)
+  requestedQuantity       Decimal? @db.Decimal(15, 3)
+  damagedQty              Decimal? @db.Decimal(15, 3)
+  /// Jejak satuan yang diketik pengguna beserta faktor konversinya saat itu.
+  /// Faktor disimpan sebagai snapshot supaya riwayat lama tidak ikut berubah
+  /// ketika "1 box = 20 pcs" kelak diperbarui menjadi angka lain.
+  inputQuantity           Decimal? @db.Decimal(15, 3)
+  inputUnit               String?
+  conversionFactor        Decimal? @db.Decimal(15, 4)
+  /// Baris transfer lama yang sisa kebutuhannya dilanjutkan oleh baris ini.
+  /// Unik: satu sisa kebutuhan hanya boleh melahirkan satu transfer lanjutan,
+  /// sehingga muat ulang halaman atau klik ganda tidak menggandakannya.
+  sourceOutstandingItemId String?  @unique
+  /// Kebutuhan outlet yang BELUM terpenuhi setelah penerimaan: diminta 18,
+  /// dikirim dan diterima baik 15, maka sisanya 3. Diisi saat penerimaan dan
+  /// dinolkan ketika outlet mengajukan permintaan pengganti — supaya sisa
+  /// kebutuhan tidak hilang hanya karena transfernya sudah RECEIVED, dan tidak
+  /// pula terhitung dua kali.
+  outstandingQty          Decimal? @db.Decimal(15, 3)
+
+  transfer          StockTransfer                  @relation(fields: [transferId], references: [id], onDelete: Cascade)
+  item              InventoryItem                  @relation(fields: [itemId], references: [id])
+  batchAllocations  StockTransferBatchAllocation[]
+  reservation       StockReservation?
+  sourceOutstanding StockTransferItem?             @relation("SisaKebutuhan", fields: [sourceOutstandingItemId], references: [id], onDelete: SetNull)
+  continuedBy       StockTransferItem?             @relation("SisaKebutuhan")
+}
+
+model StockTransferBatchAllocation {
+  id             String    @id @default(cuid())
+  transferItemId String
+  sourceBatchId  String?
+  batchNumber    String?
+  expiryDate     DateTime?
+  costPrice      Decimal?  @db.Decimal(15, 6)
+  quantity       Decimal   @db.Decimal(15, 3)
+
+  transferItem StockTransferItem @relation(fields: [transferItemId], references: [id], onDelete: Cascade)
+  sourceBatch  StockBatch?       @relation("TransferSourceBatch", fields: [sourceBatchId], references: [id], onDelete: SetNull)
+
+  @@index([transferItemId])
+  @@index([sourceBatchId])
 }
 
 // ─── STOCK OPNAME ─────────────────────────────────────────────────────────────
@@ -399,6 +1012,9 @@ model StockOpname {
   status         OpnameStatus @default(DRAFT)
   notes          String?
   submittedAt    DateTime?
+  reviewedAt     DateTime?
+  reviewedById   String?
+  reviewNotes    String?
   createdById    String?
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
@@ -414,17 +1030,23 @@ enum OpnameStatus {
   DRAFT
   SUBMITTED
   REVIEWED
+  REJECTED
 }
 
 model StockOpnameItem {
-  id            String   @id @default(cuid())
-  opnameId      String
-  itemId        String
-  systemQty     Decimal  @db.Decimal(15, 3)
-  physicalQty   Decimal? @db.Decimal(15, 3)
-  difference    Decimal? @db.Decimal(15, 3)
-  estimatedLoss Decimal? @db.Decimal(15, 2)
-  notes         String?
+  id                    String   @id @default(cuid())
+  opnameId              String
+  itemId                String
+  systemQty             Decimal  @db.Decimal(15, 3)
+  physicalQty           Decimal? @db.Decimal(15, 3)
+  difference            Decimal? @db.Decimal(15, 3)
+  estimatedLoss         Decimal? @db.Decimal(15, 2)
+  /// Harga bahan saat opname disimpan. Snapshot ini menjaga nilai historis
+  /// agar tidak ikut berubah ketika harga bahan diperbarui kemudian.
+  unitCostSnapshot      Decimal? @db.Decimal(15, 6)
+  /// Nilai absolut selisih, baik stok kurang maupun stok lebih.
+  absoluteVarianceValue Decimal? @db.Decimal(15, 2)
+  notes                 String?
 
   opname StockOpname   @relation(fields: [opnameId], references: [id], onDelete: Cascade)
   item   InventoryItem @relation(fields: [itemId], references: [id])
@@ -459,7 +1081,7 @@ model MenuModifierGroup {
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
-  organization Organization              @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  organization Organization            @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   options      MenuModifierOption[]
   items        InventoryItemModifier[]
 
@@ -473,13 +1095,32 @@ model MenuModifierOption {
   price     Decimal @default(0) @db.Decimal(15, 2)
   sortOrder Int     @default(0)
 
-  group MenuModifierGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  group              MenuModifierGroup      @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  recipeItems        ModifierRecipeItem[]
+  orderItemModifiers POSOrderItemModifier[]
+}
+
+model ModifierRecipeItem {
+  id       String  @id @default(cuid())
+  optionId String
+  itemId   String
+  quantity Decimal @db.Decimal(15, 3)
+
+  option MenuModifierOption @relation(fields: [optionId], references: [id], onDelete: Cascade)
+  item   InventoryItem      @relation(fields: [itemId], references: [id])
+
+  @@unique([optionId, itemId])
+  @@index([itemId])
 }
 
 model InventoryItemModifier {
-  itemId    String
-  groupId   String
-  sortOrder Int    @default(0)
+  itemId     String
+  groupId    String
+  sortOrder  Int     @default(0)
+  // Wajib/tidaknya ditentukan per menu: grup yang sama bisa wajib di satu menu
+  // dan opsional di menu lain. Nilai di MenuModifierGroup hanya jadi default
+  // saat grup baru dipasang ke sebuah menu.
+  isRequired Boolean @default(false)
 
   item  InventoryItem     @relation(fields: [itemId], references: [id], onDelete: Cascade)
   group MenuModifierGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
@@ -493,19 +1134,50 @@ model DiscountRule {
   id             String    @id @default(cuid())
   organizationId String
   name           String
-  type           String    // PERCENT | AMOUNT
+  type           String // PERCENT | AMOUNT
   value          Decimal   @db.Decimal(15, 2)
   minPurchase    Decimal   @default(0) @db.Decimal(15, 2)
   isActive       Boolean   @default(true)
   sortOrder      Int       @default(0)
-  validDays      String?   // comma-separated 0-6 (0=Min,1=Sen,...,6=Sab), null = setiap hari
+  scheduleMode   String    @default("RECURRING") // PERIOD = satu periode; RECURRING = jadwal harian/mingguan
+  validDays      String? // comma-separated 0-6 (0=Min,1=Sen,...,6=Sab), null = setiap hari
+  startsAt       DateTime? // null = berlaku sejak dibuat
   expiresAt      DateTime? // null = tanpa batas
+  startMinute    Int? // menit sejak 00:00 waktu Jakarta (happy hour mulai), null = sepanjang hari
+  endMinute      Int? // menit sejak 00:00 waktu Jakarta (happy hour selesai); < startMinute = lewat tengah malam
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
 
-  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  organization Organization           @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  orders       POSOrder[]
+  locations    DiscountRuleLocation[] // kosong = berlaku semua outlet
+  items        DiscountRuleItem[] // kosong = berlaku ke seluruh belanja; terisi = hanya menu tsb
 
   @@index([organizationId, isActive])
+}
+
+model DiscountRuleLocation {
+  id             String @id @default(cuid())
+  discountRuleId String
+  locationId     String
+
+  discountRule DiscountRule @relation(fields: [discountRuleId], references: [id], onDelete: Cascade)
+  location     Location     @relation(fields: [locationId], references: [id], onDelete: Cascade)
+
+  @@unique([discountRuleId, locationId])
+  @@index([locationId])
+}
+
+model DiscountRuleItem {
+  id             String @id @default(cuid())
+  discountRuleId String
+  menuItemId     String
+
+  discountRule DiscountRule  @relation(fields: [discountRuleId], references: [id], onDelete: Cascade)
+  menuItem     InventoryItem @relation(fields: [menuItemId], references: [id], onDelete: Cascade)
+
+  @@unique([discountRuleId, menuItemId])
+  @@index([menuItemId])
 }
 
 model Table {
@@ -583,38 +1255,43 @@ model POSShift {
 }
 
 model POSOrder {
-  id             String      @id @default(cuid())
-  organizationId String
-  locationId     String
-  shiftId        String?
-  cashierId      String?
-  orderNumber    String
-  orderType      OrderType   @default(DINE_IN)
-  tableNumber    String?
-  customerName   String?
-  status         OrderStatus @default(OPEN)
-  subtotal       Decimal     @db.Decimal(15, 2)
-  discountType   String?
-  discountValue  Decimal     @default(0) @db.Decimal(15, 2)
-  discountAmount Decimal     @default(0) @db.Decimal(15, 2)
-  discountLabel         String?
-  platformOrderNumber   String?
-  taxPercent     Decimal     @default(0) @db.Decimal(5, 2)
-  taxAmount      Decimal     @default(0) @db.Decimal(15, 2)
-  total          Decimal     @db.Decimal(15, 2)
-  guestSessionId String?
-  notes          String?
-  voidReason     String?
-  snapToken      String?
-  paymentRef     String?
-  paidAt         DateTime?
-  createdAt      DateTime    @default(now())
-  updatedAt      DateTime    @updatedAt
+  id                  String      @id @default(cuid())
+  organizationId      String
+  locationId          String
+  shiftId             String?
+  cashierId           String?
+  orderNumber         String
+  orderType           OrderType   @default(DINE_IN)
+  tableNumber         String?
+  customerName        String?
+  status              OrderStatus @default(OPEN)
+  subtotal            Decimal     @db.Decimal(15, 2)
+  discountType        String?
+  discountValue       Decimal     @default(0) @db.Decimal(15, 2)
+  discountAmount      Decimal     @default(0) @db.Decimal(15, 2)
+  discountLabel       String?
+  discountRuleId      String?
+  platformOrderNumber String?
+  taxPercent          Decimal     @default(0) @db.Decimal(5, 2)
+  taxAmount           Decimal     @default(0) @db.Decimal(15, 2)
+  total               Decimal     @db.Decimal(15, 2)
+  guestSessionId      String?
+  notes               String?
+  voidReason          String?
+  paymentRef          String?
+  paidAt              DateTime?
+  /// HPP pada saat pembayaran, dihitung dari resep dan harga batch/bahan.
+  cogsAmount          Decimal?    @db.Decimal(15, 2)
+  /// False berarti ada komponen resep tanpa harga atau data historis hasil estimasi.
+  cogsComplete        Boolean     @default(false)
+  createdAt           DateTime    @default(now())
+  updatedAt           DateTime    @updatedAt
 
   organization Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   location     Location       @relation(fields: [locationId], references: [id])
   shift        POSShift?      @relation(fields: [shiftId], references: [id])
   cashier      User?          @relation("OrderCashier", fields: [cashierId], references: [id])
+  discountRule DiscountRule?  @relation(fields: [discountRuleId], references: [id], onDelete: SetNull)
   items        POSOrderItem[]
   payments     POSPayment[]
 
@@ -636,8 +1313,8 @@ model POSOrderItem {
   subtotal   Decimal @db.Decimal(15, 2)
   notes      String?
 
-  order    POSOrder       @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  menuItem InventoryItem? @relation(fields: [menuItemId], references: [id], onDelete: SetNull)
+  order     POSOrder               @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  menuItem  InventoryItem?         @relation(fields: [menuItemId], references: [id], onDelete: SetNull)
   modifiers POSOrderItemModifier[]
 
   @@index([orderId])
@@ -646,13 +1323,16 @@ model POSOrderItem {
 model POSOrderItemModifier {
   id          String  @id @default(cuid())
   orderItemId String
+  optionId    String?
   groupName   String
   optionName  String
   price       Decimal @default(0) @db.Decimal(15, 2)
 
-  orderItem POSOrderItem @relation(fields: [orderItemId], references: [id], onDelete: Cascade)
+  orderItem POSOrderItem        @relation(fields: [orderItemId], references: [id], onDelete: Cascade)
+  option    MenuModifierOption? @relation(fields: [optionId], references: [id], onDelete: SetNull)
 
   @@index([orderItemId])
+  @@index([optionId])
 }
 
 model POSPayment {
@@ -701,6 +1381,9 @@ enum AlertType {
   POS_ITEM_UNMAPPED
   LOW_STOCK
   PRICE_ANOMALY
+  GOODS_RECEIVED
+  OPNAME_COMPLETED
+  TRANSFER_SENT
 }
 
 enum Severity {
@@ -744,4 +1427,43 @@ model AuditLog {
 
   @@index([organizationId, createdAt])
   @@index([entity, entityId])
+}
+
+/// Nomor WA tambahan milik supplier (admin, sales, dll.). Unik per organisasi:
+/// satu nomor tidak mungkin milik dua supplier.
+model SupplierPhone {
+  id             String   @id @default(cuid())
+  organizationId String
+  supplierId     String
+  /// Sudah dinormalkan (62…).
+  phone          String
+  label          String?
+  createdAt      DateTime @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  supplier     Supplier     @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, phone])
+  @@index([supplierId])
+}
+
+/// Dokumen pesanan supplier: invoice, foto nota/resi/barang.
+model PurchaseOrderDocument {
+  id                String   @id @default(cuid())
+  organizationId    String
+  purchaseOrderId   String
+  /// INVOICE | FOTO | LAINNYA
+  kind              String
+  url               String
+  fileName          String?
+  /// WA (dari balasan supplier) | UPLOAD (diunggah pengguna)
+  source            String
+  incomingMessageId String?
+  uploadedById      String?
+  createdAt         DateTime @default(now())
+
+  organization  Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  purchaseOrder PurchaseOrder @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
+
+  @@index([purchaseOrderId])
 }

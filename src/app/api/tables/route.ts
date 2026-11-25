@@ -21,7 +21,9 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   const user = await requireAuth()
   if (isResponse(user)) return user
-  if (user.role !== "OWNER") return err("Tidak diizinkan", 403)
+  // QR meja diurus juga oleh Supervisor dan Admin Gudang yang menyiapkan outlet,
+  // bukan hanya Owner.
+  if (!["OWNER", "SUPERVISOR", "ADMIN_GUDANG"].includes(user.role)) return err("Tidak diizinkan", 403)
 
   const { locationId, name, sortOrder } = await req.json()
   if (!locationId) return err("locationId diperlukan")

@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server"
 import { prisma } from "@/lib/db"
-import { requireAuth, isResponse, ok } from "@/lib/api-helpers"
+import { requireAuth, isResponse, ok, err } from "@/lib/api-helpers"
+import { canAccessLocation, getAccessibleLocationIds } from "@/lib/location-access"
 
 export async function GET(req: NextRequest) {
   const user = await requireAuth()
@@ -9,6 +10,8 @@ export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url)
   const locationId = searchParams.get("locationId")
   const asOf = searchParams.get("asOf")
+  const accessibleLocationIds = await getAccessibleLocationIds(user)
+  if (locationId && !(await canAccessLocation(user, locationId))) return err("Tidak ada akses ke lokasi ini", 403)
 
   // Point-in-time: sum all movements up to asOf
   if (asOf && locationId) {
@@ -17,7 +20,8 @@ export async function GET(req: NextRequest) {
       where: {
         organizationId: user.organizationId,
         locationId,
-        createdAt: { lte: new Date(asOf) },
+        affectsBalance: true,
+        effectiveAt: { lte: new Date(asOf) },
       },
       _sum: { quantity: true },
     })
@@ -32,8 +36,8 @@ export async function GET(req: NextRequest) {
   const balances = await prisma.stockBalance.findMany({
     where: {
       organizationId: user.organizationId,
+      ...(accessibleLocationIds && { locationId: { in: accessibleLocationIds } }),
       ...(locationId && { locationId }),
-      quantity: { gt: 0 },
     },
     include: {
       item: { include: { locationSettings: { select: { locationId: true, minStock: true } } } },
@@ -41,5 +45,26 @@ export async function GET(req: NextRequest) {
     },
     orderBy: { item: { name: "asc" } },
   })
-  return ok(balances)
+  // Stok yang sudah dikunci (direservasi) untuk transfer yang disetujui tetapi
+  // belum dikirim. Hanya informasi tampilan: angka fisik tidak berubah.
+  const reservasi = await prisma.stockReservation.findMany({
+    where: {
+      organizationId: user.organizationId, status: "ACTIVE",
+      ...(accessibleLocationIds && { locationId: { in: accessibleLocationIds } }),
+      ...(locationId && { locationId }),
+    },
+    select: { itemId: true, locationId: true, quantity: true, transfer: { select: { toLocation: { select: { name: true } } } } },
+  })
+  const dikunci = new Map<string, { jumlah: number; tujuan: Set<string> }>()
+  for (const r of reservasi) {
+    const kunci = `${r.itemId}:${r.locationId}`
+    const baris = dikunci.get(kunci) ?? { jumlah: 0, tujuan: new Set<string>() }
+    baris.jumlah += Number(r.quantity)
+    baris.tujuan.add(r.transfer.toLocation.name)
+    dikunci.set(kunci, baris)
+  }
+  return ok(balances.map((balance) => {
+    const baris = dikunci.get(`${balance.itemId}:${balance.locationId}`)
+    return { ...balance, reservedQuantity: baris?.jumlah ?? 0, reservedFor: baris ? [...baris.tujuan] : [] }
+  }))
 }

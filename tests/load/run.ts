@@ -27,7 +27,15 @@ const c = {
 
 // ── Stats collector ─────────────────────────────────────────────────────────
 type StatBucket = { durations: number[]; errors: number; name: string }
+type LoadLocation = { id: string; type: string }
+type LoadMenu = { id: string; name: string; sellPrice: number | string | null; isActive: boolean }
+type OpenShift = { id: string }
+type ShiftList = { items?: OpenShift[] }
 const buckets: Record<string, StatBucket> = {}
+
+function errorMessage(error: unknown) {
+  return error instanceof Error ? error.message : String(error)
+}
 
 function record(name: string, ms: number, isError = false) {
   if (!buckets[name]) buckets[name] = { durations: [], errors: 0, name }
@@ -86,18 +94,18 @@ async function discoverData(cookie: string) {
     fetch(`${BASE_URL}/api/menu`,      { headers }),
   ])
 
-  const locations: any[] = locRes.ok ? await locRes.json() : []
-  const menus: any[]     = menuRes.ok ? await menuRes.json() : []
+  const locations = (locRes.ok ? await locRes.json() : []) as LoadLocation[]
+  const menus = (menuRes.ok ? await menuRes.json() : []) as LoadMenu[]
 
-  const outlets = locations.filter((l: any) => l.type === "OUTLET")
-  const activeMenus = menus.filter((m: any) => m.isActive && Number(m.sellPrice) > 0)
+  const outlets = locations.filter((location) => location.type === "OUTLET")
+  const activeMenus = menus.filter((menu) => menu.isActive && Number(menu.sellPrice) > 0)
 
   if (!outlets.length)      throw new Error("Tidak ada outlet — jalankan npm run seed dulu")
   if (!activeMenus.length)  throw new Error("Tidak ada menu aktif — jalankan npm run seed dulu")
 
   // Cari shift yang sedang OPEN (untuk simulasi kasir)
   const shiftRes = await fetch(`${BASE_URL}/api/pos/shifts?status=OPEN`, { headers })
-  const shiftData = shiftRes.ok ? await shiftRes.json() : { items: [] }
+  const shiftData = (shiftRes.ok ? await shiftRes.json() : { items: [] }) as ShiftList
   const openShift = shiftData.items?.[0] ?? null
 
   return { outlets, menus: activeMenus, openShift }
@@ -112,8 +120,6 @@ async function virtualUser(
 ): Promise<void> {
   const headers = { Cookie: cookie, "Content-Type": "application/json" }
   const outlet  = data.outlets[userId % data.outlets.length]
-  let   reqCount = 0
-
   while (Date.now() < stopAt) {
     const roll = Math.random()
     const t0   = performance.now()
@@ -143,7 +149,7 @@ async function virtualUser(
         const items = data.menus
           .sort(() => Math.random() - 0.5)
           .slice(0, Math.floor(Math.random() * 3) + 1)
-        const total = items.reduce((s: number, i: any) => s + Number(i.sellPrice), 0)
+        const total = items.reduce((sum, item) => sum + Number(item.sellPrice), 0)
 
         const res = await fetch(`${BASE_URL}/api/pos/orders`, {
           method: "POST",
@@ -152,7 +158,7 @@ async function virtualUser(
             locationId:   outlet.id,
             shiftId:      data.openShift.id,
             orderType:    "DINE_IN",
-            items:        items.map((i: any) => ({ menuItemId: i.id, name: i.name, price: Number(i.sellPrice ?? 0), qty: 1 })),
+            items:        items.map((item) => ({ menuItemId: item.id, name: item.name, price: Number(item.sellPrice ?? 0), qty: 1 })),
             subtotal:     total,
             total,
             discountType:  null,
@@ -170,11 +176,10 @@ async function virtualUser(
         record("GET transfers", performance.now() - t0, !ok)
       }
 
-    } catch (e: any) {
+    } catch {
       record("network error", performance.now() - t0, true)
     }
 
-    reqCount++
     // Jeda realistis antar request (0.5–2 detik)
     await new Promise((r) => setTimeout(r, 500 + Math.random() * 1500))
   }
@@ -240,8 +245,8 @@ async function main() {
   try {
     cookie = await login()
     console.log(`  ${c.green}✓${c.reset}`)
-  } catch (e: any) {
-    console.log(`\n  ${c.red}✗ ${e.message}${c.reset}`)
+  } catch (error: unknown) {
+    console.log(`\n  ${c.red}✗ ${errorMessage(error)}${c.reset}`)
     console.log(`\n  Pastikan app berjalan: ${c.cyan}npm run dev${c.reset}`)
     process.exit(1)
   }
@@ -252,8 +257,8 @@ async function main() {
   try {
     data = await discoverData(cookie)
     console.log(`  ${c.green}✓${c.reset}  (${data.outlets.length} outlet, ${data.menus.length} menu, shift: ${data.openShift ? "ada" : c.yellow + "tidak ada — order test dilewati" + c.reset})`)
-  } catch (e: any) {
-    console.log(`\n  ${c.red}✗ ${e.message}${c.reset}`)
+  } catch (error: unknown) {
+    console.log(`\n  ${c.red}✗ ${errorMessage(error)}${c.reset}`)
     process.exit(1)
   }
 
@@ -262,7 +267,7 @@ async function main() {
   console.log(`\n  🚀 Menjalankan ${c.cyan}${USERS} virtual users${c.reset} selama ${c.cyan}${DURATION} detik${c.reset}...\n`)
 
   const workers = Array.from({ length: USERS }, (_, i) =>
-    virtualUser(cookie, data, stopAt, i).catch((e) => console.error(`Worker ${i} error:`, e.message))
+    virtualUser(cookie, data, stopAt, i).catch((error: unknown) => console.error(`Worker ${i} error:`, errorMessage(error)))
   )
 
   // Progress bar sederhana
@@ -281,4 +286,4 @@ async function main() {
   printResults((Date.now() - startedAt) / 1000)
 }
 
-main().catch((e) => { console.error(e); process.exit(1) })
+main().catch((error: unknown) => { console.error(errorMessage(error)); process.exit(1) })

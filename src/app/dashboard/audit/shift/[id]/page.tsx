@@ -1,10 +1,12 @@
 "use client"
 
-import { useEffect, useState } from "react"
-import { useParams, useRouter } from "next/navigation"
-import { ArrowLeft, Clock, ShoppingBag, Download } from "lucide-react"
+import { useCallback, useEffect, useState } from "react"
+import { useParams, useRouter, useSearchParams } from "next/navigation"
+import { InfoRow, InfoNote } from "@/components/ui/info-card"
+import { OrderMenuSummary, type OrderHistoryItem } from "@/components/order-menu-summary"
+import { ArrowLeft, Clock, ShoppingBag, Download, RefreshCw } from "lucide-react"
 
-type OrderItem = { id: string; name: string; qty: number; price: number; subtotal: number }
+type OrderItem = OrderHistoryItem & { price: number; subtotal: number }
 type Payment   = { id: string; method: string; amount: number; change: number }
 type Order     = {
   id: string; orderNumber: string; orderType: string; status: string
@@ -27,27 +29,47 @@ const ORDER_TYPE_LABELS: Record<string, string> = {
 function formatRp(n: number) {
   return "Rp " + Math.round(n).toLocaleString("id-ID")
 }
-function fmtDate(s: string) {
-  return new Date(s).toLocaleDateString("id-ID", {
-    weekday: "long", day: "numeric", month: "long", year: "numeric",
-    hour: "2-digit", minute: "2-digit",
-  })
-}
 function fmtTime(s: string) {
   return new Date(s).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" })
 }
+// Versi ringkas untuk kartu info: "Rab, 9 Sep 2026"
+function fmtDayShort(s: string) {
+  return new Date(s).toLocaleDateString("id-ID", {
+    weekday: "short", day: "numeric", month: "short", year: "numeric",
+  })
+}
+const sameDay = (a: string, b: string) =>
+  new Date(a).toDateString() === new Date(b).toDateString()
 
 export default function ShiftDetailPage() {
   const { id } = useParams<{ id: string }>()
   const router  = useRouter()
+  const searchParams = useSearchParams()
+  const historyQuery = searchParams.get("scope") === "history" ? "?history=1" : ""
   const [shift, setShift]         = useState<Shift | null>(null)
   const [loading, setLoading]     = useState(true)
   const [error, setError]         = useState("")
   const [downloading, setDownloading] = useState(false)
 
+  const fetchShift = useCallback(async () => {
+    setLoading(true)
+    setError("")
+    try {
+      const response = await fetch(`/api/pos/shifts/${encodeURIComponent(id)}${historyQuery}`, { cache: "no-store" })
+      const result = await response.json().catch(() => ({})) as Shift & { error?: string }
+      if (!response.ok) throw new Error(result.error ?? `Gagal memuat riwayat (${response.status})`)
+      setShift(result)
+    } catch (fetchError) {
+      setShift(null)
+      setError(fetchError instanceof Error ? fetchError.message : "Riwayat shift gagal dimuat")
+    } finally {
+      setLoading(false)
+    }
+  }, [historyQuery, id])
+
   async function downloadExcel() {
     setDownloading(true)
-    const res = await fetch(`/api/pos/shifts/${id}/export`)
+    const res = await fetch(`/api/pos/shifts/${id}/export${historyQuery}`)
     if (res.ok) {
       const blob = await res.blob()
       const url  = URL.createObjectURL(blob)
@@ -61,12 +83,9 @@ export default function ShiftDetailPage() {
   }
 
   useEffect(() => {
-    fetch(`/api/pos/shifts/${id}`)
-      .then((r) => r.ok ? r.json() : Promise.reject())
-      .then(setShift)
-      .catch(() => setError("Data tidak ditemukan"))
-      .finally(() => setLoading(false))
-  }, [id])
+    const timeoutId = window.setTimeout(() => { void fetchShift() }, 0)
+    return () => window.clearTimeout(timeoutId)
+  }, [fetchShift])
 
   if (loading) return (
     <div className="flex items-center justify-center h-64">
@@ -74,7 +93,23 @@ export default function ShiftDetailPage() {
     </div>
   )
   if (error || !shift) return (
-    <div className="max-w-3xl mx-auto py-16 text-center text-slate-400">{error || "Tidak ditemukan"}</div>
+    <div className="max-w-3xl mx-auto py-16 text-center">
+      <div className="text-sm font-medium text-slate-600">{error || "Riwayat tidak ditemukan"}</div>
+      <div className="mt-4 flex items-center justify-center gap-2">
+        <button
+          onClick={() => router.back()}
+          className="px-4 py-2 rounded-xl border border-slate-200 text-sm font-medium text-slate-600 hover:bg-slate-50"
+        >
+          Kembali
+        </button>
+        <button
+          onClick={() => void fetchShift()}
+          className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-blue-600 text-sm font-semibold text-white hover:bg-blue-700"
+        >
+          <RefreshCw className="w-4 h-4" /> Coba Lagi
+        </button>
+      </div>
+    </div>
   )
 
   const dur = shift.closedAt
@@ -83,18 +118,20 @@ export default function ShiftDetailPage() {
 
   return (
     <div className="max-w-3xl mx-auto space-y-6">
-      <div className="flex items-center gap-3">
-        <button onClick={() => router.back()} className="p-2 rounded-xl hover:bg-slate-100 transition-colors">
-          <ArrowLeft className="w-5 h-5 text-slate-500" />
-        </button>
-        <div className="flex-1">
-          <h1 className="text-xl font-bold text-slate-900">{shift.shiftNumber}</h1>
-          <p className="text-sm text-slate-400">{shift.location.name}</p>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+        <div className="flex min-w-0 items-center gap-3">
+          <button onClick={() => router.back()} className="shrink-0 rounded-xl p-2 transition-colors hover:bg-slate-100">
+            <ArrowLeft className="w-5 h-5 text-slate-500" />
+          </button>
+          <div className="min-w-0 flex-1">
+            <h1 className="truncate text-xl font-bold text-slate-900">{shift.shiftNumber}</h1>
+            <p className="truncate text-sm text-slate-400">{shift.location.name}</p>
+          </div>
         </div>
         <button
           onClick={downloadExcel}
           disabled={downloading}
-          className="flex items-center gap-2 px-3 py-2 bg-emerald-500 hover:bg-emerald-600 disabled:opacity-60 text-white text-sm font-medium rounded-xl transition-colors"
+          className="flex w-full shrink-0 items-center justify-center gap-2 rounded-xl bg-emerald-500 px-3 py-2.5 text-sm font-medium text-white transition-colors hover:bg-emerald-600 disabled:opacity-60 sm:ml-auto sm:w-auto sm:py-2"
         >
           <Download className="w-4 h-4" />
           {downloading ? "Mengunduh..." : "Download Excel"}
@@ -102,42 +139,69 @@ export default function ShiftDetailPage() {
       </div>
 
       {/* Summary cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 sm:gap-3">
         {[
           { label: "Total Penjualan", value: formatRp(Number(shift.totalSales)), color: "text-blue-600" },
           { label: "Jumlah Order",    value: String(shift.totalOrders),           color: "text-slate-800" },
           { label: "Kas Awal",        value: formatRp(Number(shift.openingBalance)), color: "text-slate-800" },
           { label: "Kas Akhir",       value: shift.closingBalance !== null ? formatRp(Number(shift.closingBalance)) : "—", color: "text-slate-800" },
         ].map((c) => (
-          <div key={c.label} className="bg-white rounded-2xl border border-slate-200 p-4">
-            <div className="text-xs text-slate-400 mb-1">{c.label}</div>
-            <div className={`text-lg font-bold ${c.color}`}>{c.value}</div>
+          <div key={c.label} className="min-w-0 rounded-2xl border border-slate-200 bg-white p-3 sm:p-4">
+            <div className="truncate text-xs text-slate-400 mb-1">{c.label}</div>
+            <div className={`truncate text-sm font-bold sm:text-lg ${c.color}`} title={c.value}>{c.value}</div>
           </div>
         ))}
       </div>
 
       {/* Info */}
-      <div className="bg-white rounded-2xl border border-slate-200 p-5 space-y-3">
-        <div className="flex items-center gap-2 text-slate-700">
+      <div className="bg-white rounded-2xl border border-slate-200 p-4 sm:p-5">
+        <div className="mb-2 flex items-center gap-2 text-slate-700">
           <Clock className="w-4 h-4 text-slate-400" />
-          <span className="text-sm font-medium">Info Shift</span>
+          <span className="text-sm font-semibold">Info Shift</span>
         </div>
-        <div className="grid grid-cols-2 gap-y-2 text-sm">
-          <span className="text-slate-400">Kasir</span>
-          <span className="text-slate-800 font-medium">{shift.cashier.name ?? "—"}</span>
-          <span className="text-slate-400">Buka</span>
-          <span className="text-slate-800">{fmtDate(shift.openedAt)}</span>
-          <span className="text-slate-400">Tutup</span>
-          <span className="text-slate-800">{shift.closedAt ? fmtDate(shift.closedAt) : "Belum ditutup"}</span>
-          <span className="text-slate-400">Durasi</span>
-          <span className="text-slate-800">
-            {dur !== null ? (dur >= 60 ? `${Math.floor(dur / 60)} jam ${dur % 60} menit` : `${dur} menit`) : "—"}
-          </span>
-          {shift.notes && <>
-            <span className="text-slate-400">Catatan</span>
-            <span className="text-slate-800">{shift.notes}</span>
-          </>}
-        </div>
+        <dl className="divide-y divide-slate-100 text-sm">
+          <InfoRow label="Kasir" value={shift.cashier.name ?? "—"} />
+          {/* Shift umumnya buka-tutup di hari yang sama, jadi tanggalnya cukup
+              ditulis sekali dan jamnya jadi rentang. Shift lintas hari tetap
+              ditampilkan penuh. */}
+          {shift.closedAt && sameDay(shift.openedAt, shift.closedAt) ? (
+            <>
+              <InfoRow label="Tanggal" value={fmtDayShort(shift.openedAt)} />
+              <InfoRow
+                label="Jam"
+                value={
+                  <span className="tabular-nums">
+                    {fmtTime(shift.openedAt)} – {fmtTime(shift.closedAt)}
+                  </span>
+                }
+              />
+            </>
+          ) : (
+            <>
+              <InfoRow
+                label="Buka"
+                value={<>{fmtDayShort(shift.openedAt)} <span className="text-slate-300">·</span> <span className="tabular-nums">{fmtTime(shift.openedAt)}</span></>}
+              />
+              <InfoRow
+                label="Tutup"
+                value={shift.closedAt
+                  ? <>{fmtDayShort(shift.closedAt)} <span className="text-slate-300">·</span> <span className="tabular-nums">{fmtTime(shift.closedAt)}</span></>
+                  : <span className="font-normal text-slate-400">Belum ditutup</span>}
+              />
+            </>
+          )}
+          <InfoRow
+            label="Durasi"
+            value={dur !== null
+              ? (dur >= 60 ? `${Math.floor(dur / 60)} jam ${dur % 60} menit` : `${dur} menit`)
+              : <span className="font-normal text-slate-400">—</span>}
+          />
+        </dl>
+        {shift.notes && (
+          <div className="mt-3">
+            <InfoNote label="Catatan">{shift.notes}</InfoNote>
+          </div>
+        )}
       </div>
 
       {/* Orders */}
@@ -156,11 +220,11 @@ export default function ShiftDetailPage() {
             {shift.orders.map((o) => {
               const isVoid = o.status === "VOID"
               return (
-                <div key={o.id} className={`px-5 py-3 ${isVoid ? "bg-red-50/40" : ""}`}>
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <span className={`text-sm font-mono font-semibold ${isVoid ? "text-slate-400 line-through" : "text-slate-800"}`}>
+                <div key={o.id} className={`px-5 py-4 ${isVoid ? "bg-red-50/40" : ""}`}>
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                        <span className={`font-mono text-sm font-semibold [overflow-wrap:anywhere] ${isVoid ? "text-slate-400 line-through" : "text-slate-800"}`}>
                           {o.orderNumber}
                         </span>
                         <span className="text-xs text-slate-400">{ORDER_TYPE_LABELS[o.orderType] ?? o.orderType}</span>
@@ -168,24 +232,24 @@ export default function ShiftDetailPage() {
                           <span className="text-xs bg-red-100 text-red-600 font-medium px-1.5 py-0.5 rounded-full">Void</span>
                         )}
                       </div>
-                      <div className="text-xs text-slate-400 mt-0.5">
-                        {o.items.map((i) => `${i.name} ×${i.qty}`).join(", ")}
+                      <div className="mt-2">
+                        <OrderMenuSummary items={o.items} className="w-full text-left" />
                       </div>
                       {isVoid && o.voidReason && (
                         <div className="text-xs text-red-500 mt-0.5">Alasan: {o.voidReason}</div>
                       )}
                     </div>
-                    <div className="text-right">
-                      <div className={`text-sm font-bold ${isVoid ? "text-slate-300 line-through" : "text-slate-900"}`}>
+                    <div className="shrink-0 text-right tabular-nums">
+                      <div className={`whitespace-nowrap text-sm font-bold ${isVoid ? "text-slate-300 line-through" : "text-slate-900"}`}>
                         {formatRp(Number(o.total))}
                       </div>
-                      <div className="text-xs text-slate-400">{fmtTime(o.createdAt)}</div>
+                      <div className="mt-1 whitespace-nowrap text-xs text-slate-400">{fmtTime(o.createdAt)}</div>
                     </div>
                   </div>
                   {!isVoid && (
-                    <div className="mt-1 flex gap-3 text-xs text-slate-400 flex-wrap">
+                    <div className="mt-3 flex flex-wrap gap-x-3 gap-y-1 text-xs text-slate-500">
                       {o.payments.map((p) => (
-                        <span key={p.id}>
+                        <span key={p.id} className="whitespace-nowrap tabular-nums">
                           {p.method === "CASH" ? "Tunai" : p.method} {formatRp(Number(p.amount))}
                           {Number(p.change) > 0 && ` · Kembalian ${formatRp(Number(p.change))}`}
                         </span>
@@ -195,9 +259,9 @@ export default function ShiftDetailPage() {
                 </div>
               )
             })}
-            <div className="px-5 py-3 flex justify-between text-sm font-semibold text-slate-800 bg-slate-50">
+            <div className="flex justify-between gap-4 bg-slate-50 px-5 py-3 text-sm font-semibold text-slate-800">
               <span>Total Penjualan</span>
-              <span>{formatRp(shift.orders.reduce((s, o) => s + Number(o.total), 0))}</span>
+              <span className="shrink-0 whitespace-nowrap tabular-nums">{formatRp(shift.orders.reduce((s, o) => s + Number(o.total), 0))}</span>
             </div>
           </div>
         )}

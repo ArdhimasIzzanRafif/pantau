@@ -13,13 +13,12 @@ const ROLE_STYLE: Record<string, string> = {
   OWNER:        "bg-blue-100 text-blue-700",
   ADMIN_GUDANG: "bg-indigo-100 text-indigo-700",
   SUPERVISOR:   "bg-sky-100 text-sky-700",
-  EMPLOYEE:     "bg-slate-100 text-slate-600",
   KASIR:        "bg-emerald-100 text-emerald-700",
 }
 
 const ROLE_LABEL: Record<string, string> = {
   OWNER: "Owner", ADMIN_GUDANG: "Admin Gudang",
-  SUPERVISOR: "Supervisor", EMPLOYEE: "Karyawan", KASIR: "Kasir",
+  SUPERVISOR: "Supervisor", KASIR: "Kasir",
 }
 
 export default function UsersPage() {

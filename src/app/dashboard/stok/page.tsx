@@ -1,12 +1,16 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { Search, Warehouse, Store, RefreshCw, TrendingDown, AlertTriangle, Info } from "lucide-react"
-import Link from "next/link"
+import { ListPagination } from "@/components/ui/list-pagination"
+import { Search, Warehouse, Store, TrendingDown, AlertTriangle } from "lucide-react"
 
 type StockBalance = {
   id: string
   quantity: number
+  /// Sudah dikunci untuk transfer yang disetujui tetapi belum dikirim.
+  reservedQuantity?: number
+  /// Nama outlet tujuan transfer yang mengunci stok ini.
+  reservedFor?: string[]
   item: {
     id: string
     name: string
@@ -29,12 +33,30 @@ type ItemRow = {
   sku: string | null
   unit: string
   category: string | null
-  minStock: number | null
   locationMinStock: Record<string, number>
   byLocation: Record<string, number>
+  reservedByLocation: Record<string, number>
+  reservedForByLocation: Record<string, string[]>
 }
 
 type Location = { id: string; name: string; type: string }
+const PAGE_SIZE = 5
+const stockNumber = new Intl.NumberFormat("id-ID", { maximumFractionDigits: 3 })
+
+/**
+ * "250 dikunci untuk Outlet Cabang 2 (belum dikirim) · bebas 0" — stok yang
+ * sudah disetujui untuk dikirim ke outlet tetapi barangnya belum berangkat.
+ * Hanya tampil bila ada stok yang dikunci.
+ */
+function InfoDikunci({ qty, dikunci, tujuan }: { qty: number; dikunci: number; tujuan: string[] }) {
+  if (dikunci <= 0) return null
+  const bebas = Math.max(0, qty - dikunci)
+  return (
+    <p className="text-[10px] font-semibold text-indigo-600">
+      {stockNumber.format(dikunci)} dikunci untuk {tujuan.length ? tujuan.join(", ") : "transfer"} (belum dikirim) · bebas {stockNumber.format(bebas)}
+    </p>
+  )
+}
 
 export default function StokPage() {
   const [balances, setBalances] = useState<StockBalance[]>([])
@@ -44,20 +66,43 @@ export default function StokPage() {
   const [search, setSearch] = useState("")
   const [category, setCategory] = useState("Semua")
   const [activeLocationId, setActiveLocationId] = useState("Semua")
+  const [locationSearch, setLocationSearch] = useState("")
+  const [locationPage, setLocationPage] = useState(1)
+  const [showAllLocations, setShowAllLocations] = useState(false)
+  const [itemPage, setItemPage] = useState(1)
+  const [showAllItems, setShowAllItems] = useState(false)
 
-  async function fetchData() {
-    setLoading(true)
-    const [bRes, lRes] = await Promise.all([
-      fetch("/api/stock-balances"),
-      fetch("/api/locations"),
-    ])
-    if (bRes.ok) setBalances(await bRes.json())
-    if (lRes.ok) setLocations(await lRes.json())
-    setLastUpdated(new Date())
-    setLoading(false)
+  async function fetchData(opts?: { silent?: boolean }) {
+    if (!opts?.silent) setLoading(true)
+    try {
+      const [bRes, lRes] = await Promise.all([
+        fetch("/api/stock-balances"),
+        fetch("/api/locations"),
+      ])
+      if (bRes.ok) setBalances(await bRes.json())
+      if (lRes.ok) setLocations(await lRes.json())
+      setLastUpdated(new Date())
+    } finally {
+      if (!opts?.silent) setLoading(false)
+    }
   }
 
-  useEffect(() => { fetchData() }, [])
+  useEffect(() => {
+    const timeoutId = window.setTimeout(() => { void fetchData() }, 0)
+    // Auto-refresh: polling berkala + saat tab kembali difokuskan, tanpa
+    // spinner penuh agar stok terlihat "realtime" tanpa klik Refresh manual.
+    const intervalId = window.setInterval(() => { void fetchData({ silent: true }) }, 15_000)
+    const onFocus = () => { void fetchData({ silent: true }) }
+    const onVisible = () => { if (document.visibilityState === "visible") void fetchData({ silent: true }) }
+    window.addEventListener("focus", onFocus)
+    document.addEventListener("visibilitychange", onVisible)
+    return () => {
+      window.clearTimeout(timeoutId)
+      window.clearInterval(intervalId)
+      window.removeEventListener("focus", onFocus)
+      document.removeEventListener("visibilitychange", onVisible)
+    }
+  }, [])
 
   const itemMap = new Map<string, ItemRow>()
   for (const b of balances) {
@@ -72,20 +117,29 @@ export default function StokPage() {
         sku: b.item.sku,
         unit: b.item.unit,
         category: b.item.category,
-        minStock: b.item.minStock,
         locationMinStock,
         byLocation: {},
+        reservedByLocation: {},
+        reservedForByLocation: {},
       })
     }
     itemMap.get(b.item.id)!.byLocation[b.location.id] = Number(b.quantity)
+    itemMap.get(b.item.id)!.reservedByLocation[b.location.id] = Number(b.reservedQuantity ?? 0)
+    itemMap.get(b.item.id)!.reservedForByLocation[b.location.id] = b.reservedFor ?? []
   }
   const items = Array.from(itemMap.values())
 
   const categories = ["Semua", ...Array.from(new Set(items.map((i) => i.category ?? "Lainnya")))]
 
+  const matchingLocations = locations.filter((location) => location.name.toLocaleLowerCase("id-ID").includes(locationSearch.trim().toLocaleLowerCase("id-ID")))
+  const locationPages = Math.max(1, Math.ceil(matchingLocations.length / PAGE_SIZE))
+  const currentLocationPage = Math.min(locationPage, locationPages)
+  const pagedLocations = showAllLocations
+    ? matchingLocations
+    : matchingLocations.slice((currentLocationPage - 1) * PAGE_SIZE, currentLocationPage * PAGE_SIZE)
   const shownLocations = activeLocationId === "Semua"
-    ? locations
-    : locations.filter((l) => l.id === activeLocationId)
+    ? pagedLocations
+    : locations.filter((location) => location.id === activeLocationId)
 
   const filtered = items.filter((item) => {
     const matchSearch =
@@ -94,10 +148,15 @@ export default function StokPage() {
     const matchCat = category === "Semua" || item.category === category
     return matchSearch && matchCat
   })
+  const itemPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE))
+  const currentItemPage = Math.min(itemPage, itemPages)
+  const pagedItems = showAllItems
+    ? filtered
+    : filtered.slice((currentItemPage - 1) * PAGE_SIZE, currentItemPage * PAGE_SIZE)
 
   function effectiveMin(item: ItemRow, locId: string): number | null {
     if (locId in item.locationMinStock) return item.locationMinStock[locId]
-    return item.minStock
+    return null
   }
 
   function qtyColor(qty: number, min: number | null) {
@@ -145,16 +204,6 @@ export default function StokPage() {
             {lastUpdated && ` · Diperbarui ${lastUpdated.toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" })}`}
           </p>
         </div>
-        <div className="flex gap-2">
-          <button
-            onClick={fetchData}
-            disabled={loading}
-            className="flex items-center gap-2 px-3 py-2 border border-slate-200 bg-white hover:bg-slate-50 text-slate-600 text-sm rounded-full transition-colors disabled:opacity-50"
-          >
-            <RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} />
-            Refresh
-          </button>
-        </div>
       </div>
 
       {loading ? (
@@ -163,17 +212,6 @@ export default function StokPage() {
         </div>
       ) : (
         <>
-          {/* How-to callout */}
-          <div className="flex items-start gap-3 bg-blue-50 border border-blue-200 rounded-2xl px-5 py-3.5">
-            <Info className="w-4 h-4 text-blue-500 mt-0.5 shrink-0" />
-            <p className="text-sm text-blue-700">
-              Jumlah stok tidak bisa diedit langsung. Untuk menyesuaikan stok fisik, gunakan{" "}
-              <Link href="/dashboard/opname" className="font-semibold underline hover:text-blue-900">Opname Fisik</Link>.
-              Transfer antar lokasi menggunakan{" "}
-              <Link href="/dashboard/transfer" className="font-semibold underline hover:text-blue-900">Transfer Barang</Link>.
-            </p>
-          </div>
-
           {/* Alert banner */}
           {totalLow > 0 && (
             <div className="flex items-center gap-3 bg-orange-50 border border-orange-200 rounded-2xl px-5 py-3.5">
@@ -188,10 +226,25 @@ export default function StokPage() {
           )}
 
           {/* Location selector */}
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+          <div className="relative">
+            <Search className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+            <input
+              type="search"
+              value={locationSearch}
+              onChange={(event) => {
+                setLocationSearch(event.target.value)
+                setLocationPage(1)
+                setActiveLocationId("Semua")
+              }}
+              placeholder="Cari outlet atau gudang..."
+              aria-label="Cari outlet atau gudang"
+              className="w-full rounded-xl border border-slate-200 bg-white py-2.5 pl-10 pr-4 text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+          </div>
+          <div className="-mx-4 flex gap-3 overflow-x-auto px-4 pb-2 sm:mx-0 sm:grid sm:grid-cols-3 sm:overflow-visible sm:px-0 lg:grid-cols-5">
             <button
               onClick={() => setActiveLocationId("Semua")}
-              className={`group p-4 rounded-2xl border-2 text-left transition-all ${
+              className={`group w-36 shrink-0 rounded-2xl border-2 p-4 text-left transition-all sm:w-auto ${
                 activeLocationId === "Semua"
                   ? "border-slate-800 bg-slate-900"
                   : "border-slate-200 bg-white hover:border-slate-300"
@@ -210,7 +263,7 @@ export default function StokPage() {
               </div>
             </button>
 
-            {locations.map((loc) => {
+            {pagedLocations.map((loc) => {
               const isWarehouse = loc.type === "WAREHOUSE"
               const active = activeLocationId === loc.id
               const low = lowStockCount(loc.id)
@@ -219,7 +272,7 @@ export default function StokPage() {
                 <button
                   key={loc.id}
                   onClick={() => setActiveLocationId(active ? "Semua" : loc.id)}
-                  className={`group p-4 rounded-2xl border-2 text-left transition-all ${
+                  className={`group w-36 shrink-0 rounded-2xl border-2 p-4 text-left transition-all sm:w-auto ${
                     active
                       ? isWarehouse
                         ? "border-blue-600 bg-blue-600"
@@ -257,6 +310,17 @@ export default function StokPage() {
               )
             })}
           </div>
+          {matchingLocations.length === 0 && (
+            <p className="rounded-xl border border-dashed border-slate-200 bg-white px-4 py-5 text-center text-sm text-slate-500">Lokasi tidak ditemukan.</p>
+          )}
+          <ListPagination
+            label="lokasi"
+            total={matchingLocations.length}
+            page={currentLocationPage}
+            showAll={showAllLocations}
+            onPageChange={(page) => { setLocationPage(page); setActiveLocationId("Semua") }}
+            onShowAllChange={(showAll) => { setShowAllLocations(showAll); setLocationPage(1); setActiveLocationId("Semua") }}
+          />
 
           {/* Search + category filter */}
           <div className="flex flex-col sm:flex-row gap-3">
@@ -266,7 +330,7 @@ export default function StokPage() {
                 type="text"
                 placeholder="Cari nama item atau SKU..."
                 value={search}
-                onChange={(e) => setSearch(e.target.value)}
+                onChange={(e) => { setSearch(e.target.value); setItemPage(1) }}
                 className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-slate-200 bg-white text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
             </div>
@@ -274,7 +338,7 @@ export default function StokPage() {
               {categories.map((cat) => (
                 <button
                   key={cat}
-                  onClick={() => setCategory(cat)}
+                  onClick={() => { setCategory(cat); setItemPage(1) }}
                   className={`px-3.5 py-2.5 rounded-full text-xs font-semibold whitespace-nowrap transition-colors ${
                     category === cat
                       ? "bg-slate-900 text-white"
@@ -303,10 +367,75 @@ export default function StokPage() {
             </div>
           </div>
 
-          {/* Table */}
-          <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
+          {activeLocationId === "Semua" && locations.length > PAGE_SIZE && (
+            <p className="text-xs text-slate-500">
+              Stok per lokasi menampilkan {showAllLocations ? "semua lokasi" : "lokasi pada halaman aktif"}. Total item tetap mencakup seluruh lokasi.
+            </p>
+          )}
+
+          {/* Kartu stok untuk HP/tablet: setiap lokasi terbaca tanpa tabel menyempit. */}
+          <div className="space-y-3 xl:hidden">
+            {matchingLocations.length === 0 && activeLocationId === "Semua" ? (
+              <div className="rounded-2xl border border-slate-200 bg-white px-5 py-12 text-center text-sm text-slate-500">Cari lokasi lain untuk melihat stok.</div>
+            ) : filtered.length === 0 ? (
+              <div className="rounded-2xl border border-slate-200 bg-white px-5 py-12 text-center text-sm text-slate-500">
+                Tidak ada item ditemukan
+              </div>
+            ) : pagedItems.map((item) => {
+              const total = locations.reduce((sum, loc) => sum + (item.byLocation[loc.id] ?? 0), 0)
+              return (
+                <article key={item.itemId} className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+                  <div className="flex items-start justify-between gap-3 border-b border-slate-100 px-4 py-4">
+                    <div className="min-w-0">
+                      <p className="break-words text-base font-bold text-slate-900">
+                        {item.name}
+                      </p>
+                      <p className="mt-1 text-xs text-slate-500">
+                        {item.unit}{item.category ? ` · ${item.category}` : ""}{item.sku ? ` · ${item.sku}` : ""}
+                      </p>
+                    </div>
+                    {activeLocationId === "Semua" && (
+                      <div className="shrink-0 rounded-xl bg-blue-50 px-3 py-2 text-right">
+                        <p className="text-[10px] font-semibold uppercase tracking-wide text-blue-500">Total</p>
+                        <p className="text-base font-bold tabular-nums text-blue-800">{stockNumber.format(total)}</p>
+                      </div>
+                    )}
+                  </div>
+                  <div className="space-y-2 p-3">
+                    {shownLocations.map((loc) => {
+                      const qty = item.byLocation[loc.id] ?? 0
+                      const min = effectiveMin(item, loc.id)
+                      const low = min != null && qty < min
+                      return (
+                        <div key={loc.id}
+                          className={`flex min-h-16 items-center justify-between gap-3 rounded-xl px-3 py-2.5 ${qtyBg(qty, min) || "bg-slate-50"}`}>
+                          <div className="flex min-w-0 items-center gap-2.5">
+                            <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${loc.type === "WAREHOUSE" ? "bg-blue-100 text-blue-600" : "bg-orange-100 text-orange-600"}`}>
+                              {loc.type === "WAREHOUSE" ? <Warehouse className="h-4 w-4" /> : <Store className="h-4 w-4" />}
+                            </div>
+                            <div className="min-w-0">
+                              <p className="truncate text-sm font-semibold text-slate-800">{loc.name}</p>
+                              <p className="text-[11px] text-slate-500">{min == null ? "Minimum belum diatur" : `Min. ${stockNumber.format(min)} ${item.unit}`}</p>
+                            </div>
+                          </div>
+                          <div className="shrink-0 text-right">
+                            <p className={`text-base font-bold tabular-nums ${qtyColor(qty, min)}`}>{stockNumber.format(qty)}</p>
+                            {low && <p className={`text-[10px] font-semibold ${qty === 0 ? "text-red-600" : "text-orange-600"}`}>{qty === 0 ? "Habis" : "Rendah"}</p>}
+                            <InfoDikunci qty={qty} dikunci={item.reservedByLocation[loc.id] ?? 0} tujuan={item.reservedForByLocation[loc.id] ?? []} />
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </article>
+              )
+            })}
+          </div>
+
+          {/* Tabel tetap tersedia saat layar desktop cukup lebar. */}
+          <div className="hidden overflow-hidden rounded-2xl border border-slate-200 bg-white xl:block">
             <div className="overflow-x-auto">
-              <table className="w-full text-sm">
+              <table className="w-full min-w-max text-sm">
                 <thead>
                   <tr className="bg-slate-900">
                     <th className="text-left text-xs font-semibold text-slate-300 px-5 py-3.5 w-52 sticky left-0 bg-slate-900">
@@ -321,6 +450,9 @@ export default function StokPage() {
                           }
                           {loc.name.replace("Outlet ", "").replace("Gudang ", "")}
                         </div>
+                        <div className="mt-1 text-[10px] font-normal text-slate-500">
+                          Stok / Minimum
+                        </div>
                       </th>
                     ))}
                     {activeLocationId === "Semua" && (
@@ -329,27 +461,22 @@ export default function StokPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {filtered.length === 0 ? (
+                  {matchingLocations.length === 0 && activeLocationId === "Semua" || filtered.length === 0 ? (
                     <tr>
                       <td colSpan={shownLocations.length + 2} className="px-5 py-16 text-center text-slate-400 text-sm">
-                        Tidak ada item ditemukan
+                        {matchingLocations.length === 0 ? "Cari lokasi lain untuk melihat stok." : "Tidak ada item ditemukan"}
                       </td>
                     </tr>
                   ) : (
-                    filtered.map((item, idx) => {
-                      const total = shownLocations.reduce((s, l) => s + (item.byLocation[l.id] ?? 0), 0)
+                    pagedItems.map((item, idx) => {
+                      const total = locations.reduce((sum, loc) => sum + (item.byLocation[loc.id] ?? 0), 0)
                       return (
                         <tr key={item.itemId} className={`hover:bg-blue-50/40 transition-colors ${idx % 2 === 0 ? "" : "bg-slate-50/50"}`}>
                           <td className="px-5 py-3.5 sticky left-0 bg-inherit">
-                            <div className="font-semibold text-slate-900 text-[13px]">{item.name}</div>
+                            <span className="font-semibold text-slate-900 text-[13px]">{item.name}</span>
                             <div className="text-xs text-slate-400 mt-0.5">
                               {item.unit}
                               {item.category ? ` · ${item.category}` : ""}
-                              {(item.minStock != null || Object.keys(item.locationMinStock).length > 0) && (
-                                <span className="ml-1.5 text-slate-300">
-                                  {Object.keys(item.locationMinStock).length > 0 ? "min per lokasi" : `min ${item.minStock}`}
-                                </span>
-                              )}
                             </div>
                           </td>
                           {shownLocations.map((loc) => {
@@ -357,13 +484,21 @@ export default function StokPage() {
                             const min = effectiveMin(item, loc.id)
                             return (
                               <td key={loc.id} className={`px-5 py-3.5 text-right ${qtyBg(qty, min)}`}>
-                                <span className={`text-[13px] ${qtyColor(qty, min)}`}>{qty}</span>
+                                <div className="flex flex-col items-end gap-0.5">
+                                  <span className={`text-[13px] ${qtyColor(qty, min)}`}>
+                                    {stockNumber.format(qty)}
+                                  </span>
+                                  <span className={`text-[10px] ${min == null ? "text-slate-300" : "text-slate-400"}`}>
+                                    {min == null ? "Min. belum diatur" : `Min. ${stockNumber.format(min)} ${item.unit}`}
+                                  </span>
+                                  <InfoDikunci qty={qty} dikunci={item.reservedByLocation[loc.id] ?? 0} tujuan={item.reservedForByLocation[loc.id] ?? []} />
+                                </div>
                               </td>
                             )
                           })}
                           {activeLocationId === "Semua" && (
                             <td className="px-5 py-3.5 text-right">
-                              <span className="text-[13px] font-bold text-slate-900">{total}</span>
+                              <span className="text-[13px] font-bold text-slate-900">{stockNumber.format(total)}</span>
                             </td>
                           )}
                         </tr>
@@ -374,6 +509,14 @@ export default function StokPage() {
               </table>
             </div>
           </div>
+          <ListPagination
+            label="item"
+            total={filtered.length}
+            page={currentItemPage}
+            showAll={showAllItems}
+            onPageChange={setItemPage}
+            onShowAllChange={(showAll) => { setShowAllItems(showAll); setItemPage(1) }}
+          />
         </>
       )}
     </div>

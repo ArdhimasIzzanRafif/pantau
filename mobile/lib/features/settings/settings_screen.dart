@@ -1,7 +1,5 @@
-import 'dart:convert';
-import 'dart:io';
 import 'package:flutter/material.dart';
-import 'package:flutter_image_compress/flutter_image_compress.dart';
+import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image_picker/image_picker.dart';
 import '../../core/api/api_client.dart';
@@ -216,21 +214,11 @@ class _QrisCardState extends State<_QrisCard> {
 
     setState(() { _uploading = true; _error = ''; });
     try {
-      // Compress to max 480px, JPEG 70% — same as web
-      final compressed = await FlutterImageCompress.compressWithFile(
-        picked.path,
-        minWidth: 1, minHeight: 1,
-        quality: 70,
-      );
-      if (compressed == null) throw Exception('Gagal mengompresi gambar');
-
-      final base64Str = 'data:image/jpeg;base64,${base64Encode(compressed)}';
-
-      await api.patch('/api/organization', data: {
-        'qrisImageUrl': base64Str,
-        'qrisPayload': null,
+      final formData = FormData.fromMap({
+        'file': await MultipartFile.fromFile(picked.path, filename: picked.name),
       });
-      widget.onDeleted(); // reload parent
+      await api.postMultipart('/api/upload/qris', data: formData);
+      widget.onDeleted();
     } catch (e) {
       if (mounted) setState(() => _error = e.toString().replaceFirst('Exception: ', ''));
     } finally {
@@ -258,7 +246,7 @@ class _QrisCardState extends State<_QrisCard> {
     if (ok != true || !mounted) return;
     setState(() => _deleting = true);
     try {
-      await api.patch('/api/organization', data: {'qrisImageUrl': null, 'qrisPayload': null});
+      await api.delete('/api/upload/qris');
       widget.onDeleted();
     } catch (e) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.toString())));
@@ -272,18 +260,12 @@ class _QrisCardState extends State<_QrisCard> {
     final qrisUrl     = widget.org?['qrisImageUrl'] as String?;
     final qrisPayload = widget.org?['qrisPayload']  as String?;
     final hasQris     = qrisUrl != null && qrisUrl.isNotEmpty;
-    final isDynamic   = qrisPayload != null && qrisPayload.isNotEmpty;
+    final isVerified  = qrisPayload != null && qrisPayload.isNotEmpty;
 
     Widget? imageWidget;
     if (hasQris) {
-      if (qrisUrl.startsWith('data:image/')) {
-        try {
-          final bytes = base64Decode(qrisUrl.split(',').last);
-          imageWidget = Image.memory(bytes, width: 110, height: 110, fit: BoxFit.contain);
-        } catch (_) {}
-      } else if (qrisUrl.startsWith('http')) {
-        imageWidget = Image.network(qrisUrl, width: 110, height: 110, fit: BoxFit.contain);
-      }
+      final imageUrl = qrisUrl.startsWith('http') ? qrisUrl : '$kApiBase$qrisUrl';
+      imageWidget = Image.network(imageUrl, width: 110, height: 110, fit: BoxFit.contain);
     }
 
     return Container(
@@ -329,13 +311,13 @@ class _QrisCardState extends State<_QrisCard> {
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                 decoration: BoxDecoration(
-                  color: isDynamic ? const Color(0xFFDCFCE7) : const Color(0xFFFFF7ED),
+                  color: isVerified ? const Color(0xFFDCFCE7) : const Color(0xFFFEF2F2),
                   borderRadius: BorderRadius.circular(20),
                 ),
                 child: Row(mainAxisSize: MainAxisSize.min, children: [
-                  Icon(isDynamic ? Icons.check_circle_rounded : Icons.info_outline_rounded, size: 13, color: isDynamic ? const Color(0xFF15803D) : const Color(0xFF92400E)),
+                  Icon(isVerified ? Icons.check_circle_rounded : Icons.error_outline_rounded, size: 13, color: isVerified ? const Color(0xFF15803D) : AppTheme.danger),
                   const SizedBox(width: 5),
-                  Text(isDynamic ? 'Dinamis ✓' : 'Statis', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: isDynamic ? const Color(0xFF15803D) : const Color(0xFF92400E))),
+                  Text(isVerified ? 'QRIS terverifikasi ✓' : 'Belum terverifikasi', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: isVerified ? const Color(0xFF15803D) : AppTheme.danger)),
                 ]),
               ),
             ]),
@@ -370,7 +352,7 @@ class _QrisCardState extends State<_QrisCard> {
             ])),
           ]),
         ] else ...[
-          const Text('Upload screenshot atau foto QRIS dari aplikasi bank Anda untuk ditampilkan di halaman kasir.', style: TextStyle(fontSize: 12, color: AppTheme.textSecondary, height: 1.5)),
+          const Text('Upload QRIS Indonesia dari aplikasi bank. Server akan menolak gambar biasa, QR non-QRIS, dan QRIS dengan checksum tidak valid.', style: TextStyle(fontSize: 12, color: AppTheme.textSecondary, height: 1.5)),
           const SizedBox(height: 12),
           ElevatedButton.icon(
             onPressed: _uploading ? null : _upload,
@@ -381,7 +363,7 @@ class _QrisCardState extends State<_QrisCard> {
             style: ElevatedButton.styleFrom(backgroundColor: AppTheme.primary, foregroundColor: Colors.white, shape: const StadiumBorder(), elevation: 0),
           ),
           const SizedBox(height: 8),
-          const Text('Format PNG, JPG, WEBP · Maks 10MB', style: TextStyle(fontSize: 11, color: AppTheme.textMuted)),
+          const Text('Format PNG, JPG, WEBP · Maks 5MB', style: TextStyle(fontSize: 11, color: AppTheme.textMuted)),
         ],
       ]),
     );

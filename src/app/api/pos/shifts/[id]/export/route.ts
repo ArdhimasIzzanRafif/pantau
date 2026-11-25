@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/db"
 import { requireAuth, isResponse, err } from "@/lib/api-helpers"
-import * as XLSX from "xlsx"
+import { createStyledExcelReport } from "@/lib/excel-report"
+import { getHistoryScope } from "@/lib/history-scope"
 
 const STATUS_LABEL: Record<string, string> = {
   PAID: "Lunas",
@@ -24,16 +25,25 @@ function fmtTime(d: Date) {
 }
 
 export async function GET(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   const user = await requireAuth()
   if (isResponse(user)) return user
 
   const { id } = await params
+  const historyScope = await getHistoryScope(user, req.nextUrl.searchParams.get("history") === "1")
+  if (!historyScope.allowed) return err("Tidak memiliki akses ke Riwayat", 403)
+  if (req.nextUrl.searchParams.get("history") === "1" && user.role !== "OWNER") {
+    return err("Riwayat shift hanya dapat dilihat Owner", 403)
+  }
 
   const shift = await prisma.pOSShift.findFirst({
-    where: { id, organizationId: user.organizationId },
+    where: {
+      id,
+      organizationId: user.organizationId,
+      ...(historyScope.actorId && { cashierId: historyScope.actorId }),
+    },
     include: {
       cashier:  { select: { name: true, email: true } },
       location: { select: { name: true } },
@@ -96,15 +106,23 @@ export async function GET(
     }
   }
 
-  const ws = XLSX.utils.json_to_sheet(rows)
-  ws["!cols"] = [14, 12, 10, 16, 16, 16, 20, 12, 14, 16, 14, 12, 10, 12, 14, 16, 18, 12, 10, 12, 10, 14, 18, 14]
-    .map((w) => ({ wch: w }))
-
-  const wb = XLSX.utils.book_new()
-  XLSX.utils.book_append_sheet(wb, ws, "Detail Transaksi")
-
-  const buf = XLSX.write(wb, { type: "buffer", bookType: "xlsx" })
-  const filename = `${shift.shiftNumber.replace(/[^a-zA-Z0-9-]/g, "_")}.xlsx`
+  const headers = [
+    "No. Struk", "Tanggal", "Jam", "Nama Outlet", "Nama Kasir", "Nama Pelanggan",
+    "Produk", "Opsi Tambahan", "Jumlah Produk", "Jumlah Dibatalkan", "Harga Per Produk",
+    "Subtotal", "Tipe Harga", "Diskon Produk", "Tipe Diskon Produk", "Diskon Transaksi",
+    "Tipe Diskon Transaksi", "Redeem Poin", "Pajak", "Total", "Status", "Kode Pembayaran",
+    "Metode Pembayaran", "No. Referensi",
+  ]
+  const buf = await createStyledExcelReport({
+    title: `Riwayat Penjualan ${shift.shiftNumber}`,
+    sheetName: "Riwayat Penjualan",
+    rows,
+    headers,
+    widths: [14, 12, 10, 16, 16, 16, 20, 12, 14, 16, 14, 12, 10, 12, 14, 16, 18, 12, 10, 12, 10, 14, 18, 14],
+    currencyHeaders: ["Harga Per Produk", "Subtotal", "Diskon Produk", "Diskon Transaksi", "Redeem Poin", "Pajak", "Total"],
+    integerHeaders: ["Jumlah Produk", "Jumlah Dibatalkan"],
+  })
+  const filename = `riwayat_penjualan_${shift.shiftNumber.replace(/[^a-zA-Z0-9-]/g, "_")}.xlsx`
 
   return new NextResponse(buf, {
     headers: {

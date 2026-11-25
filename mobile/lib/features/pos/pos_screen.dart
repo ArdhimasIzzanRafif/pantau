@@ -695,12 +695,12 @@ class _ProductCard extends StatelessWidget {
 
   bool get _isEmoji {
     final url = item.imageUrl ?? '';
-    return url.isNotEmpty && !url.startsWith('http');
+    return url.isNotEmpty && !url.startsWith('http') && !url.startsWith('/');
   }
 
   bool get _isUrl {
     final url = item.imageUrl ?? '';
-    return url.startsWith('http');
+    return url.startsWith('http') || url.startsWith('/');
   }
 
   @override
@@ -727,7 +727,7 @@ class _ProductCard extends StatelessWidget {
                 height: 110,
                 color: const Color(0xFFF8FAFC),
                 child: _isUrl
-                  ? Image.network(item.imageUrl!, fit: BoxFit.cover, errorBuilder: (_, e, s) => _placeholder)
+                  ? Image.network(resolveApiUrl(item.imageUrl!), fit: BoxFit.cover, errorBuilder: (_, e, s) => _placeholder)
                   : _isEmoji
                     ? Center(child: Text(item.imageUrl!, style: const TextStyle(fontSize: 44)))
                     : _placeholder,

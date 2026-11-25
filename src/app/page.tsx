@@ -1,17 +1,16 @@
 "use client";
-import { useState } from "react";
+import { useEffect, useState, type MouseEvent } from "react";
 import Link from "next/link";
+import { PantauLogo } from "@/components/pantau-logo";
 import {
   BarChart3,
   Package,
   AlertTriangle,
   ArrowRight,
   CheckCircle,
-  XCircle,
   Upload,
   Warehouse,
   ClipboardList,
-  ShieldCheck,
   Star,
   Bell,
   ShoppingCart,
@@ -21,11 +20,10 @@ import {
   Sun,
   Moon,
   TrendingUp,
-  Users,
   Receipt,
   ChevronDown,
-  CreditCard,
-  Zap,
+  Menu as MenuIcon,
+  X,
 } from "lucide-react";
 
 /* ─── Minimal theme ─── */
@@ -58,29 +56,69 @@ const D = {
 
 export default function LandingPage() {
   const [dark, setDark] = useState(false);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const T = dark ? D : L;
 
-  const section = `py-28 px-6 transition-colors duration-300 ${T.bg}`;
-  const section2 = `py-28 px-6 transition-colors duration-300 ${T.bg2}`;
+  useEffect(() => {
+    const closeMenu = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setMobileMenuOpen(false);
+    };
+
+    window.addEventListener("keydown", closeMenu);
+    return () => window.removeEventListener("keydown", closeMenu);
+  }, []);
+
+  const scrollToSection = (
+    event: MouseEvent<HTMLAnchorElement>,
+    href: string,
+  ) => {
+    const target = document.querySelector<HTMLElement>(href);
+    if (!target) return;
+
+    event.preventDefault();
+    setMobileMenuOpen(false);
+
+    const reduceMotion = window.matchMedia(
+      "(prefers-reduced-motion: reduce)",
+    ).matches;
+
+    target.scrollIntoView({
+      behavior: reduceMotion ? "auto" : "smooth",
+      block: "start",
+    });
+    window.history.replaceState(null, "", href);
+  };
+
+  const section = `px-4 py-16 transition-colors duration-300 sm:px-6 sm:py-20 lg:py-24 ${T.bg}`;
+  const section2 = `px-4 py-16 transition-colors duration-300 sm:px-6 sm:py-20 lg:py-24 ${T.bg2}`;
 
   return (
     <div
-      className={`min-h-screen antialiased transition-colors duration-300 ${T.bg} ${T.text}`}
+      className={`landing-page min-h-screen antialiased transition-colors duration-300 ${T.bg} ${T.text}`}
       style={{ fontFeatureSettings: '"ss03"' }}
     >
       {/* ── NAV ── */}
       <nav
-        className={`fixed top-0 inset-x-0 z-50 h-14 border-b backdrop-blur-xl transition-colors duration-300
+        className={`fixed inset-x-0 top-0 z-50 border-b backdrop-blur-xl transition-colors duration-300
         ${dark ? "bg-slate-950/80 border-white/8" : "bg-white/90 border-slate-200"}`}
       >
-        <div className="max-w-6xl mx-auto px-6 h-full grid grid-cols-3 items-center">
-          <div className="flex items-center gap-2">
-            <div className="w-7 h-7 bg-blue-600 rounded-lg flex items-center justify-center">
-              <BarChart3 className="w-3.5 h-3.5 text-white" />
-            </div>
-            <span className="font-bold text-base">Pantau</span>
+        <div className="mx-auto flex h-16 max-w-7xl items-center justify-between gap-4 px-4 sm:px-6">
+          {/* Logo jauh lebih sempit daripada grup tombol di kanan, jadi kedua
+              sisi diberi flex-1 (basis 0) agar lebarnya dibagi rata. Dengan
+              begitu menu di tengah jatuh tepat di titik tengah bar.
+              flex-1 dipasang di pembungkus, bukan di <a>, supaya area klik
+              logo tidak ikut melebar ke ruang kosong di sebelahnya. */}
+          <div className="flex shrink-0 lg:flex-1 lg:basis-0">
+            <a
+              href="#beranda"
+              className="landing-tap flex items-center gap-2.5"
+              onClick={(event) => scrollToSection(event, "#beranda")}
+            >
+              <PantauLogo className="h-8 w-8" priority />
+              <span className="text-base font-bold tracking-tight">Pantau</span>
+            </a>
           </div>
-          <div className="hidden md:flex items-center justify-center gap-8">
+          <div className="hidden items-center justify-center gap-7 lg:flex">
             {[
               ["#fitur", "Fitur"],
               ["#cara-kerja", "Cara Kerja"],
@@ -90,17 +128,19 @@ export default function LandingPage() {
               <a
                 key={h}
                 href={h}
-                className={`text-sm font-medium transition-colors ${T.sub} hover:${T.text}`}
+                onClick={(event) => scrollToSection(event, h)}
+                className={`landing-nav-link rounded-lg px-1 py-2 text-sm font-medium transition-colors ${dark ? "text-white/55 hover:text-white" : "text-slate-500 hover:text-slate-950"}`}
               >
                 {l}
               </a>
             ))}
           </div>
-          <div className="flex items-center justify-end gap-2">
+          <div className="flex flex-1 basis-0 items-center justify-end gap-1.5 sm:gap-2">
             <button
+              type="button"
               onClick={() => setDark((d) => !d)}
-              className={`w-8 h-8 rounded-full flex items-center justify-center transition-colors ${T.toggle}`}
-              aria-label="Toggle dark mode"
+              className={`landing-icon-button flex h-10 w-10 items-center justify-center rounded-full transition-colors ${T.toggle}`}
+              aria-label={dark ? "Gunakan tema terang" : "Gunakan tema gelap"}
             >
               {dark ? (
                 <Sun className="w-4 h-4" />
@@ -110,34 +150,119 @@ export default function LandingPage() {
             </button>
             <Link
               href="/login"
-              className={`hidden sm:block text-sm font-medium px-3 py-2 transition-colors ${T.sub}`}
+              className={`landing-tap hidden h-10 items-center rounded-full px-4 text-sm font-medium transition-colors sm:flex ${dark ? "text-white/60 hover:text-white" : "text-slate-600 hover:text-slate-950"}`}
             >
               Masuk
             </Link>
             <Link
               href="/register"
-              className={`text-sm font-semibold px-5 py-2.5 rounded-full transition-all ${T.pill}`}
+              className={`landing-primary-button hidden h-10 items-center rounded-full px-5 text-sm font-semibold transition-all sm:flex ${T.pill}`}
             >
               Daftar Sekarang
             </Link>
+            <button
+              type="button"
+              onClick={() => setMobileMenuOpen((open) => !open)}
+              className={`landing-icon-button relative z-10 flex h-10 w-10 items-center justify-center rounded-full transition-colors lg:hidden ${T.toggle}`}
+              aria-label={mobileMenuOpen ? "Tutup navigasi" : "Buka navigasi"}
+              aria-expanded={mobileMenuOpen}
+              aria-controls="mobile-navigation"
+            >
+              {mobileMenuOpen ? (
+                <X className="h-4 w-4" />
+              ) : (
+                <MenuIcon className="h-4 w-4" />
+              )}
+            </button>
+          </div>
+        </div>
+
+        <button
+          type="button"
+          aria-label="Tutup menu navigasi"
+          tabIndex={mobileMenuOpen ? 0 : -1}
+          onClick={() => setMobileMenuOpen(false)}
+          className={`fixed inset-x-0 bottom-0 top-16 -z-10 bg-slate-950/25 backdrop-blur-[2px] transition-opacity duration-300 lg:hidden ${
+            mobileMenuOpen
+              ? "pointer-events-auto opacity-100"
+              : "pointer-events-none opacity-0"
+          }`}
+        />
+
+        <div
+          id="mobile-navigation"
+          aria-hidden={!mobileMenuOpen}
+          className={`absolute inset-x-0 top-full max-h-[calc(100dvh-4rem)] overflow-y-auto border-t px-4 py-4 shadow-xl transition-all duration-300 ease-out lg:hidden ${
+            mobileMenuOpen
+              ? "visible translate-y-0 opacity-100"
+              : "pointer-events-none invisible -translate-y-3 opacity-0"
+          } ${dark ? "border-white/8 bg-slate-950" : "border-slate-100 bg-white"}`}
+        >
+          <div className="mx-auto grid max-w-7xl gap-1">
+            {[
+              ["#fitur", "Fitur"],
+              ["#cara-kerja", "Cara Kerja"],
+              ["#harga", "Harga"],
+              ["#faq", "FAQ"],
+            ].map(([href, label]) => (
+              <a
+                key={href}
+                href={href}
+                onClick={(event) => scrollToSection(event, href)}
+                tabIndex={mobileMenuOpen ? 0 : -1}
+                className={`landing-mobile-link rounded-xl px-3 py-3 text-sm font-medium transition-colors ${dark ? "text-white/70 hover:bg-white/8 hover:text-white" : "text-slate-700 hover:bg-slate-50"}`}
+              >
+                {label}
+              </a>
+            ))}
+            <div
+              className={`my-2 h-px ${dark ? "bg-white/8" : "bg-slate-100"}`}
+            />
+            <div className="grid grid-cols-2 gap-2">
+              <Link
+                href="/login"
+                tabIndex={mobileMenuOpen ? 0 : -1}
+                onClick={() => setMobileMenuOpen(false)}
+                className={`landing-tap flex items-center justify-center rounded-xl border px-4 py-3 text-sm font-semibold transition-all ${T.pillOut}`}
+              >
+                Masuk
+              </Link>
+              <Link
+                href="/register"
+                tabIndex={mobileMenuOpen ? 0 : -1}
+                onClick={() => setMobileMenuOpen(false)}
+                className={`landing-primary-button flex items-center justify-center rounded-xl px-4 py-3 text-sm font-semibold transition-all ${T.pill}`}
+                >
+                Daftar
+              </Link>
+            </div>
           </div>
         </div>
       </nav>
 
       {/* ── HERO ── */}
       <section
-        className={`relative pt-28 pb-0 px-6 overflow-hidden transition-colors duration-300 ${T.bg}`}
+        id="beranda"
+        className={`scroll-mt-16 relative overflow-hidden px-4 pb-0 pt-24 transition-colors duration-300 sm:px-6 sm:pt-28 ${T.bg}`}
       >
+        {/* Cahaya latar hero.
+            Sebelumnya blok solid + `filter: blur(80px)`. Radius sebesar itu
+            diaproksimasi berbeda oleh tiap mesin — Chrome dengan akselerasi GPU
+            merasterisasinya jadi gumpalan pekat bertepi jelas, sementara Safari
+            melebarkannya jadi sapuan lembut. Gradien radial memberi hasil yang
+            sama persis di semua mesin dan tidak membebani GPU. */}
         <div
-          className="absolute top-0 left-1/2 -translate-x-1/2 w-200 h-80 rounded-full blur-3xl pointer-events-none
-          opacity-30 bg-blue-400"
-          style={{ filter: "blur(80px)" }}
+          className="pointer-events-none absolute left-1/2 -top-8 h-[40rem] w-[min(70rem,140vw)] -translate-x-1/2 sm:top-0"
+          style={{
+            background:
+              "radial-gradient(closest-side, rgba(96,165,250,0.30), rgba(96,165,250,0.26) 32%, rgba(96,165,250,0.15) 56%, rgba(96,165,250,0.05) 78%, rgba(96,165,250,0) 100%)",
+          }}
         />
 
-        <div className="max-w-4xl mx-auto text-center pt-16 pb-16 relative">
+        <div className="relative mx-auto max-w-4xl pb-12 pt-8 text-center sm:pb-16 sm:pt-12">
           {/* Eyebrow */}
           <div
-            className={`inline-flex items-center gap-2 border px-4 py-1.5 rounded-full text-xs font-semibold mb-8 transition-colors
+            className={`landing-reveal landing-reveal-1 mb-6 inline-flex max-w-full items-center gap-2 rounded-full border px-3 py-1.5 text-[11px] font-semibold transition-colors sm:mb-8 sm:px-4 sm:text-xs
             ${dark ? "border-blue-500/30 bg-blue-500/10 text-blue-400" : "border-blue-200 bg-blue-50 text-blue-600"}`}
           >
             <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse" />
@@ -146,7 +271,7 @@ export default function LandingPage() {
 
           {/* Headline */}
           <h1
-            className={`text-[clamp(2.6rem,6.5vw,5rem)] leading-[1.05] tracking-tight mb-6 transition-colors ${T.text}`}
+            className={`landing-reveal landing-reveal-2 mb-5 text-[clamp(2.35rem,7vw,5rem)] leading-[1.04] tracking-[-0.04em] transition-colors sm:mb-6 ${T.text}`}
             style={{ fontWeight: 300 }}
           >
             Satu platform.
@@ -157,33 +282,34 @@ export default function LandingPage() {
           </h1>
 
           <p
-            className={`text-lg max-w-lg mx-auto mb-10 leading-relaxed transition-colors ${T.sub}`}
+            className={`landing-reveal landing-reveal-3 mx-auto mb-8 max-w-xl text-base leading-relaxed transition-colors sm:mb-10 sm:text-lg ${T.sub}`}
           >
-            Kasir, Stok Multi-Outlet, Opname Fisik, Transfer Gudang, Dan
-            Peringatan Real-Time Semua Terhubung Dalam Satu Platform.
+            Kasir, stok multi-outlet, opname fisik, transfer gudang, dan
+            peringatan real-time—semua terhubung dalam satu platform.
           </p>
 
-          <div className="flex flex-col sm:flex-row items-center justify-center gap-3 mb-4">
+          <div className="landing-reveal landing-reveal-4 mb-4 flex flex-col items-center justify-center gap-3 sm:flex-row">
             <Link
               href="/register"
-              className={`w-full sm:w-auto flex items-center justify-center gap-2 px-8 py-3.5 rounded-full font-semibold text-sm transition-all ${T.pill}`}
+              className={`landing-primary-button group flex w-full items-center justify-center gap-2 rounded-full px-8 py-3.5 text-sm font-semibold transition-all sm:w-auto ${T.pill}`}
             >
-              Daftar Sekarang <ArrowRight className="w-4 h-4" />
+              Daftar Sekarang <ArrowRight className="h-4 w-4 transition-transform duration-300 group-hover:translate-x-1" />
             </Link>
             <a
               href="#fitur"
-              className={`w-full sm:w-auto flex items-center justify-center px-8 py-3.5 rounded-full font-semibold text-sm transition-all ${T.pillOut}`}
+              onClick={(event) => scrollToSection(event, "#fitur")}
+              className={`landing-secondary-button flex w-full items-center justify-center rounded-full px-8 py-3.5 text-sm font-semibold transition-all sm:w-auto ${T.pillOut}`}
             >
               Lihat Fitur
             </a>
           </div>
-          <p className={`text-xs mb-16 transition-colors ${T.sub}`}>
+          <p className={`landing-reveal landing-reveal-5 mb-10 text-xs transition-colors sm:mb-12 ${T.sub}`}>
             Daftar dan langsung pakai · Tim kami siap membantu onboarding
           </p>
 
           {/* Stats */}
           <div
-            className={`flex items-center justify-center gap-12 mb-16 pb-16 border-b transition-colors ${T.border}`}
+            className={`mx-auto mb-12 grid max-w-sm grid-cols-2 gap-4 border-b pb-12 transition-colors sm:mb-16 sm:pb-16 ${T.border}`}
           >
             {[
               ["100+", "Bisnis terdaftar"],
@@ -207,14 +333,14 @@ export default function LandingPage() {
         </div>
 
         {/* ── HERO DASHBOARD MOCKUP ── */}
-        <div className="max-w-5xl mx-auto">
+        <div className="mx-auto max-w-5xl">
           <div
-            className={`rounded-t-2xl overflow-hidden border-x border-t shadow-2xl transition-colors
+            className={`overflow-hidden rounded-t-xl border-x border-t shadow-2xl transition-colors sm:rounded-t-2xl
             ${dark ? "border-white/10 shadow-black/60" : "border-slate-200 shadow-slate-200/60"}`}
           >
             {/* Chrome */}
             <div
-              className={`flex items-center gap-3 px-4 py-3 border-b transition-colors
+              className={`flex items-center gap-2 border-b px-3 py-2.5 transition-colors sm:gap-3 sm:px-4 sm:py-3
               ${dark ? "bg-slate-900 border-white/8" : "bg-slate-50 border-slate-200"}`}
             >
               <div className="flex gap-1.5">
@@ -227,7 +353,7 @@ export default function LandingPage() {
                 ))}
               </div>
               <div
-                className={`flex-1 max-w-48 mx-auto rounded-md px-3 py-1 text-xs text-center border transition-colors
+                className={`mx-auto max-w-48 flex-1 truncate rounded-md border px-2 py-1 text-center text-[10px] transition-colors sm:px-3 sm:text-xs
                 ${dark ? "bg-slate-800 border-white/10 text-white/30" : "bg-white border-slate-200 text-slate-400"}`}
               >
                 🔒 app.pantau.id/dashboard
@@ -294,23 +420,23 @@ export default function LandingPage() {
                 ))}
               </div>
               {/* Main */}
-              <div className="flex-1 p-5">
-                <div className="flex items-center justify-between mb-5">
-                  <div>
+              <div className="min-w-0 flex-1 p-3 sm:p-5">
+                <div className="mb-4 flex min-w-0 items-center justify-between gap-3 sm:mb-5">
+                  <div className="min-w-0">
                     <div
                       className={`text-[11px] font-medium transition-colors ${T.sub}`}
                     >
                       Pantau — Dashboard
                     </div>
                     <div
-                      className={`text-sm font-bold transition-colors ${T.text}`}
+                      className={`truncate text-sm font-bold transition-colors ${T.text}`}
                     >
                       Selamat pagi, Budiman 👋
                     </div>
                   </div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex shrink-0 items-center gap-2">
                     <div
-                      className={`text-[11px] font-semibold px-2.5 py-1 rounded-full border transition-colors
+                      className={`hidden rounded-full border px-2.5 py-1 text-[11px] font-semibold transition-colors sm:block
                       ${dark ? "bg-white/5 border-white/10 text-white/40" : "bg-slate-50 border-slate-200 text-slate-500"}`}
                     >
                       Owner · Burger Bali
@@ -322,7 +448,7 @@ export default function LandingPage() {
                   </div>
                 </div>
                 {/* KPI Cards — match real dashboard */}
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+                <div className="mb-3 grid grid-cols-2 gap-2 sm:mb-4 sm:gap-3 md:grid-cols-4">
                   {[
                     {
                       l: "Outlet Aktif",
@@ -359,10 +485,10 @@ export default function LandingPage() {
                   ].map((s) => (
                     <div
                       key={s.l}
-                      className={`rounded-2xl p-4 transition-colors ${s.bg}`}
+                      className={`min-w-0 rounded-xl p-3 transition-colors sm:rounded-2xl sm:p-4 ${s.bg}`}
                     >
                       <div
-                        className={`text-2xl font-bold tracking-tight ${s.c}`}
+                        className={`truncate text-lg font-bold tracking-tight sm:text-2xl ${s.c}`}
                       >
                         {s.v}
                       </div>
@@ -375,10 +501,10 @@ export default function LandingPage() {
                   ))}
                 </div>
                 {/* Bottom panels — match real dashboard */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
                   {/* Alerts panel */}
                   <div
-                    className={`rounded-2xl p-4 border transition-colors ${dark ? "bg-white/3 border-white/6" : "bg-white border-slate-100"}`}
+                    className={`rounded-xl border p-3.5 transition-colors sm:rounded-2xl sm:p-4 ${dark ? "bg-white/3 border-white/6" : "bg-white border-slate-100"}`}
                   >
                     <div
                       className={`text-[11px] font-bold uppercase tracking-widest flex items-center gap-1.5 mb-3.5 transition-colors ${T.sub}`}
@@ -417,7 +543,7 @@ export default function LandingPage() {
                   </div>
                   {/* Stock per outlet panel */}
                   <div
-                    className={`rounded-2xl p-4 border transition-colors ${dark ? "bg-white/3 border-white/6" : "bg-white border-slate-100"}`}
+                    className={`rounded-xl border p-3.5 transition-colors sm:rounded-2xl sm:p-4 ${dark ? "bg-white/3 border-white/6" : "bg-white border-slate-100"}`}
                   >
                     <div
                       className={`text-[11px] font-bold uppercase tracking-widest flex items-center gap-1.5 mb-3.5 transition-colors ${T.sub}`}
@@ -434,7 +560,7 @@ export default function LandingPage() {
                       ].map((r) => (
                         <div key={r.n} className="flex items-center gap-2.5">
                           <div
-                            className={`text-[11px] w-24 shrink-0 font-medium transition-colors ${T.sub}`}
+                            className={`w-20 shrink-0 truncate text-[11px] font-medium transition-colors sm:w-24 ${T.sub}`}
                           >
                             {r.n}
                           </div>
@@ -465,9 +591,9 @@ export default function LandingPage() {
       {/* ── FEATURE 1: POS BUILT-IN ── */}
       <section
         id="fitur"
-        className={`py-28 px-6 transition-colors duration-300 bg-slate-950`}
+        className="scroll-mt-16 bg-slate-950 px-4 py-16 transition-colors duration-300 sm:px-6 sm:py-20 lg:py-24"
       >
-        <div className="max-w-6xl mx-auto grid grid-cols-1 lg:grid-cols-2 gap-16 items-center">
+        <div className="mx-auto grid max-w-6xl grid-cols-1 items-center gap-10 lg:grid-cols-2 lg:gap-16">
           {/* Text */}
           <div>
             <div className="text-blue-400 text-xs font-bold uppercase tracking-widest mb-4">
@@ -582,7 +708,7 @@ export default function LandingPage() {
 
       {/* ── FEATURE 2: STOK MULTI-OUTLET ── */}
       <section className={section}>
-        <div className="max-w-6xl mx-auto grid grid-cols-1 lg:grid-cols-2 gap-16 items-center">
+        <div className="mx-auto grid max-w-6xl grid-cols-1 items-center gap-10 lg:grid-cols-2 lg:gap-16">
           {/* Stock Mockup */}
           <div
             className={`rounded-2xl border overflow-hidden transition-colors ${T.card} shadow-xl ${dark ? "shadow-black/40" : "shadow-slate-200/60"}`}
@@ -708,13 +834,10 @@ export default function LandingPage() {
               satu tempat.
             </h2>
             <p className={`leading-relaxed mb-8 transition-colors ${T.sub}`}>
-              Saldo stok di setiap outlet diperbarui secara otomatis dariPantau
-              mendeteksi selisih stok, stok menipis, transfer belum
-              dikonfirmasi, dan kenaikan harga beli. Peringatan masuk ke Owner
-              sebelum jadi masalah besar. Opname fisik digital — supervisor
-              input dari HP, selisih terhitung otomatis. transaksi kasir,
-              penerimaan barang supplier, hingga transfer antar lokasi. Setiap
-              pergerakan stok terdokumentasi lengkap dan dapat diaudit kapan
+              Saldo stok di setiap outlet diperbarui otomatis dari transaksi
+              kasir, penerimaan barang supplier, hingga transfer antar lokasi.
+              Pantau mendeteksi stok menipis dan selisih lebih awal, sementara
+              seluruh pergerakan tetap terdokumentasi dan dapat diaudit kapan
               saja.
             </p>
             <ul className="space-y-3 mb-8">
@@ -741,7 +864,7 @@ export default function LandingPage() {
 
       {/* ── FEATURE 3: ALERTS & OPNAME ── */}
       <section className={section2}>
-        <div className="max-w-6xl mx-auto grid grid-cols-1 lg:grid-cols-2 gap-16 items-center">
+        <div className="mx-auto grid max-w-6xl grid-cols-1 items-center gap-10 lg:grid-cols-2 lg:gap-16">
           {/* Text */}
           <div>
             <div
@@ -878,9 +1001,9 @@ export default function LandingPage() {
       </section>
 
       {/* ── ALL FEATURES GRID ── */}
-      <section className={`py-28 px-6 transition-colors duration-300 ${T.bg}`}>
+      <section className={`px-4 py-16 transition-colors duration-300 sm:px-6 sm:py-20 lg:py-24 ${T.bg}`}>
         <div className="max-w-6xl mx-auto">
-          <div className="text-center mb-16">
+          <div className="mb-10 text-center sm:mb-14">
             <div
               className={`text-xs font-bold uppercase tracking-widest mb-4 transition-colors ${T.eye}`}
             >
@@ -998,10 +1121,10 @@ export default function LandingPage() {
       {/* ── HOW IT WORKS ── */}
       <section
         id="cara-kerja"
-        className={`py-28 px-6 bg-slate-950 transition-colors duration-300`}
+        className="scroll-mt-16 bg-slate-950 px-4 py-16 transition-colors duration-300 sm:px-6 sm:py-20 lg:py-24"
       >
         <div className="max-w-4xl mx-auto">
-          <div className="text-center mb-16">
+          <div className="mb-10 text-center sm:mb-14">
             <div className="text-blue-400 text-xs font-bold uppercase tracking-widest mb-4">
               Cara Kerja
             </div>
@@ -1039,7 +1162,7 @@ export default function LandingPage() {
             ].map((s) => (
               <div
                 key={s.n}
-                className="bg-white/4 hover:bg-white/6 border border-white/8 hover:border-blue-500/30 rounded-2xl p-8 transition-all"
+                className="rounded-2xl border border-white/8 bg-white/4 p-6 transition-all hover:border-blue-500/30 hover:bg-white/6 sm:p-8"
               >
                 <div className="text-5xl font-black text-white/6 mb-4">
                   {s.n}
@@ -1055,7 +1178,7 @@ export default function LandingPage() {
       {/* ── TESTIMONIALS ── */}
       <section className={section}>
         <div className="max-w-5xl mx-auto">
-          <div className="text-center mb-16">
+          <div className="mb-10 text-center sm:mb-14">
             <div
               className={`text-xs font-bold uppercase tracking-widest mb-4 transition-colors ${T.eye}`}
             >
@@ -1094,7 +1217,7 @@ export default function LandingPage() {
             ].map((t) => (
               <div
                 key={t.n}
-                className={`flex flex-col rounded-2xl p-7 border-2 transition-all hover:shadow-xl ${dark ? "border-white/8 hover:border-blue-500/30 bg-white/2" : "border-slate-100 hover:border-blue-200 hover:shadow-blue-50/80"}`}
+                className={`flex flex-col rounded-2xl border-2 p-5 transition-all hover:-translate-y-0.5 hover:shadow-xl sm:p-7 ${dark ? "border-white/8 hover:border-blue-500/30 bg-white/2" : "border-slate-100 hover:border-blue-200 hover:shadow-blue-50/80"}`}
               >
                 <div className="flex mb-4">
                   {[...Array(5)].map((_, i) => (
@@ -1135,9 +1258,9 @@ export default function LandingPage() {
       </section>
 
       {/* ── PRICING ── */}
-      <section id="harga" className={section2}>
+      <section id="harga" className={`scroll-mt-16 ${section2}`}>
         <div className="max-w-5xl mx-auto">
-          <div className="text-center mb-16">
+          <div className="mb-10 text-center sm:mb-14">
             <div
               className={`text-xs font-bold uppercase tracking-widest mb-4 transition-colors ${T.eye}`}
             >
@@ -1191,7 +1314,7 @@ export default function LandingPage() {
             ].map((plan) => (
               <div
                 key={plan.n}
-                className={`relative rounded-2xl p-8 border-2 transition-all ${
+                className={`relative rounded-2xl border-2 p-6 transition-all sm:p-8 ${
                   plan.pop
                     ? "border-blue-600 bg-blue-600 text-white shadow-2xl shadow-blue-200/40 md:-mt-4 md:-mb-4"
                     : dark
@@ -1239,7 +1362,7 @@ export default function LandingPage() {
                 </ul>
                 <Link
                   href="/register"
-                  className={`w-full py-3.5 rounded-full font-semibold text-sm flex items-center justify-center gap-2 transition-all ${
+                  className={`landing-primary-button flex w-full items-center justify-center gap-2 rounded-full py-3.5 text-sm font-semibold transition-all ${
                     plan.pop
                       ? "bg-white text-blue-600 hover:bg-blue-50 font-bold"
                       : T.pill
@@ -1257,9 +1380,9 @@ export default function LandingPage() {
       </section>
 
       {/* ── FAQ ── */}
-      <section id="faq" className={section}>
+      <section id="faq" className={`scroll-mt-16 ${section}`}>
         <div className="max-w-2xl mx-auto">
-          <div className="text-center mb-14">
+          <div className="mb-10 text-center sm:mb-12">
             <div
               className={`text-xs font-bold uppercase tracking-widest mb-4 transition-colors ${T.eye}`}
             >
@@ -1300,7 +1423,7 @@ export default function LandingPage() {
                 className={`group rounded-2xl border-2 overflow-hidden transition-all ${dark ? "border-white/8 hover:border-blue-500/30" : "border-slate-100 hover:border-blue-200"}`}
               >
                 <summary
-                  className={`flex items-center justify-between gap-4 p-6 cursor-pointer list-none select-none font-medium transition-colors ${T.text}`}
+                  className={`flex cursor-pointer list-none select-none items-center justify-between gap-4 p-4 font-medium transition-colors sm:p-6 ${T.text}`}
                 >
                   {item.q}
                   <div
@@ -1312,7 +1435,7 @@ export default function LandingPage() {
                   </div>
                 </summary>
                 <div
-                  className={`px-6 pb-6 border-t transition-colors ${T.border}`}
+                  className={`border-t px-4 pb-5 transition-colors sm:px-6 sm:pb-6 ${T.border}`}
                 >
                   <p
                     className={`text-sm leading-relaxed pt-4 transition-colors ${T.sub}`}
@@ -1327,7 +1450,7 @@ export default function LandingPage() {
       </section>
 
       {/* ── CTA ── */}
-      <section className="bg-slate-950 py-36 px-6 relative overflow-hidden">
+      <section className="relative overflow-hidden bg-slate-950 px-4 py-20 sm:px-6 sm:py-24 lg:py-28">
         <div
           className="absolute inset-0 pointer-events-none"
           style={{
@@ -1337,7 +1460,7 @@ export default function LandingPage() {
         />
         <div className="max-w-3xl mx-auto text-center relative">
           <h2
-            className="text-white text-[clamp(2.5rem,6.5vw,4.5rem)] leading-[1.04] tracking-tight mb-6"
+            className="mb-6 text-[clamp(2.25rem,6.5vw,4.5rem)] leading-[1.04] tracking-[-0.04em] text-white"
             style={{ fontWeight: 300 }}
           >
             Bisnis Anda layak dikelola
@@ -1345,28 +1468,28 @@ export default function LandingPage() {
             <span className="text-blue-400">dengan lebih baik.</span>
           </h2>
           <p
-            className="text-white/40 text-lg mb-10 max-w-md mx-auto leading-relaxed"
+            className="mx-auto mb-8 max-w-md text-base leading-relaxed text-white/50 sm:mb-10 sm:text-lg"
             style={{ fontWeight: 300 }}
           >
-            Daftar sekarang dan tim kami
-            <br />
+            Daftar sekarang dan tim kami{" "}
+            <br className="hidden sm:block" />
             siap membantu proses onboarding Anda.
           </p>
           <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
             <Link
               href="/register"
-              className="w-full sm:w-auto flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-500 text-white font-semibold px-10 py-4 rounded-full transition-all text-base shadow-xl shadow-blue-600/30"
+              className="landing-primary-button group flex w-full items-center justify-center gap-2 rounded-full bg-blue-600 px-10 py-4 text-base font-semibold text-white shadow-xl shadow-blue-600/30 transition-all hover:bg-blue-500 sm:w-auto"
             >
-              Daftar Sekarang <ArrowRight className="w-4 h-4" />
+              Daftar Sekarang <ArrowRight className="h-4 w-4 transition-transform duration-300 group-hover:translate-x-1" />
             </Link>
             <Link
               href="/login"
-              className="w-full sm:w-auto flex items-center justify-center border border-white/20 hover:border-white/40 text-white/60 hover:text-white font-medium px-8 py-4 rounded-full transition-all text-base"
+              className="landing-secondary-button flex w-full items-center justify-center rounded-full border border-white/20 px-8 py-4 text-base font-medium text-white/60 transition-all hover:border-white/40 hover:text-white sm:w-auto"
             >
               Sudah punya akun? Masuk
             </Link>
           </div>
-          <div className="flex flex-wrap items-center justify-center gap-6 mt-8">
+          <div className="mt-8 flex flex-wrap items-center justify-center gap-x-6 gap-y-3">
             {[
               "Web & Mobile app",
               "Onboarding dibantu tim kami",
@@ -1374,7 +1497,7 @@ export default function LandingPage() {
             ].map((t) => (
               <span
                 key={t}
-                className="flex items-center gap-1.5 text-xs text-white/25"
+                className="flex items-center gap-1.5 text-xs text-white/40"
               >
                 <CheckCircle className="w-3.5 h-3.5 text-blue-400" /> {t}
               </span>
@@ -1384,27 +1507,25 @@ export default function LandingPage() {
       </section>
 
       {/* ── FOOTER ── */}
-      <footer className="bg-slate-950 border-t border-white/6 py-16 px-6">
-        <div className="max-w-5xl mx-auto">
-          <div className="flex flex-col md:flex-row items-start justify-between gap-10 mb-12">
+      <footer className="border-t border-white/6 bg-slate-950 px-4 py-12 sm:px-6 sm:py-16">
+        <div className="mx-auto max-w-6xl">
+          <div className="mb-10 grid grid-cols-1 gap-10 md:grid-cols-[minmax(0,1fr)_auto] md:items-start">
             <div className="max-w-xs">
               <div className="flex items-center gap-2 mb-4">
-                <div className="w-7 h-7 bg-blue-600 rounded-lg flex items-center justify-center">
-                  <BarChart3 className="w-3.5 h-3.5 text-white" />
-                </div>
+                <PantauLogo className="h-7 w-7" />
                 <span className="text-white font-bold">Pantau</span>
               </div>
-              <p className="text-sm text-white/25 leading-relaxed">
+              <p className="text-sm leading-relaxed text-white/40">
                 Platform operasional all-in-one untuk UMKM F&B dan Retail
                 Indonesia. POS, stok, opname, transfer — satu dashboard.
               </p>
             </div>
-            <div className="flex gap-12 sm:gap-16 text-sm">
+            <div className="grid w-full grid-cols-2 gap-8 text-sm sm:gap-16 md:w-auto">
               <div>
                 <div className="text-white/40 font-semibold mb-4 text-xs uppercase tracking-wider">
                   Produk
                 </div>
-                <ul className="space-y-3 text-white/25">
+                <ul className="space-y-3 text-white/40">
                   {[
                     ["#fitur", "Fitur"],
                     ["#harga", "Harga"],
@@ -1414,6 +1535,7 @@ export default function LandingPage() {
                     <li key={h}>
                       <a
                         href={h}
+                        onClick={(event) => scrollToSection(event, h)}
                         className="hover:text-white transition-colors"
                       >
                         {l}
@@ -1426,7 +1548,7 @@ export default function LandingPage() {
                 <div className="text-white/40 font-semibold mb-4 text-xs uppercase tracking-wider">
                   Perusahaan
                 </div>
-                <ul className="space-y-3 text-white/25">
+                <ul className="space-y-3 text-white/40">
                   {[
                     "Tentang Kami",
                     "Hubungi Kami",
@@ -1446,8 +1568,8 @@ export default function LandingPage() {
               </div>
             </div>
           </div>
-          <div className="border-t border-white/5 pt-8 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-white/15">
-            <span>© 2025 Pantau. Hak cipta dilindungi.</span>
+          <div className="flex flex-col items-start justify-between gap-3 border-t border-white/5 pt-6 text-xs text-white/40 sm:flex-row sm:items-center sm:pt-8">
+            <span>© 2026 Pantau. Hak cipta dilindungi.</span>
             <span>Dibuat untuk UMKM Indonesia</span>
           </div>
         </div>

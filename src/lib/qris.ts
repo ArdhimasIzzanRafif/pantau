@@ -14,13 +14,16 @@ function crc16(str: string): string {
 
 type TLV = { tag: string; value: string }
 
-function parseTLV(data: string): TLV[] {
+function parseTLV(data: string): TLV[] | null {
   const result: TLV[] = []
   let i = 0
-  while (i + 4 <= data.length) {
+  while (i < data.length) {
+    if (i + 4 > data.length) return null
     const tag = data.slice(i, i + 2)
-    const len = parseInt(data.slice(i + 2, i + 4), 10)
-    if (isNaN(len)) break
+    const lengthText = data.slice(i + 2, i + 4)
+    if (!/^\d{2}$/.test(tag) || !/^\d{2}$/.test(lengthText)) return null
+    const len = Number(lengthText)
+    if (i + 4 + len > data.length) return null
     const value = data.slice(i + 4, i + 4 + len)
     result.push({ tag, value })
     i += 4 + len
@@ -34,8 +37,48 @@ function buildTLV(tags: TLV[]): string {
     .join("")
 }
 
+export type QrisValidationResult =
+  | { valid: true; payload: string }
+  | { valid: false; error: string }
+
+export function validateQrisPayload(rawPayload: string): QrisValidationResult {
+  const payload = rawPayload.trim()
+  if (!payload.startsWith("000201")) {
+    return { valid: false, error: "QR yang dipilih bukan QRIS pembayaran" }
+  }
+
+  const tags = parseTLV(payload)
+  if (!tags?.length) {
+    return { valid: false, error: "Struktur data QRIS tidak valid" }
+  }
+
+  const crcTag = tags.at(-1)
+  if (!crcTag || crcTag.tag !== "63" || crcTag.value.length !== 4 || !/^[0-9A-Fa-f]{4}$/.test(crcTag.value)) {
+    return { valid: false, error: "Checksum QRIS tidak ditemukan" }
+  }
+
+  const expectedCrc = crc16(payload.slice(0, -4))
+  if (expectedCrc !== crcTag.value.toUpperCase()) {
+    return { valid: false, error: "Checksum QRIS tidak valid" }
+  }
+
+  const country = tags.find((tag) => tag.tag === "58")?.value
+  const currency = tags.find((tag) => tag.tag === "53")?.value
+  const hasQrisIdentifier = tags.some((tag) => {
+    const nested = parseTLV(tag.value)
+    return nested?.some((entry) => entry.value.toUpperCase() === "ID.CO.QRIS.WWW") ?? false
+  })
+
+  if (country !== "ID" || currency !== "360" || !hasQrisIdentifier) {
+    return { valid: false, error: "QR terdeteksi, tetapi bukan QRIS Indonesia yang valid" }
+  }
+
+  return { valid: true, payload }
+}
+
 export function makeQrisDynamic(payload: string, amount: number): string {
   const tags = parseTLV(payload)
+  if (!tags) throw new Error("Payload QRIS tidak valid")
 
   // Change initiation method to dynamic (12)
   const initTag = tags.find((t) => t.tag === "01")

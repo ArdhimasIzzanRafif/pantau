@@ -50,7 +50,7 @@ class _TransferScreenState extends ConsumerState<TransferScreen> {
         api.get('/api/inventory'),
         api.get('/api/stock-balances'),
       ]);
-      _transfers = (r[0] as List?) ?? [];
+      _transfers = asList(r[0]);
       _locations = (r[1] as List?) ?? [];
       _inventory = (r[2] as List?) ?? [];
       if (_locations.isNotEmpty) _fromId = _locations[0]['id'];

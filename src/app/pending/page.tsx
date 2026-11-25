@@ -1,43 +1,25 @@
 "use client"
 
-import { useSession, signOut } from "next-auth/react"
-import { useRouter } from "next/navigation"
-import { useEffect, useState } from "react"
-import { BarChart3, Clock, Loader2 } from "lucide-react"
+import { signOut } from "next-auth/react"
+import { useState } from "react"
+import { Clock, Loader2 } from "lucide-react"
+import { PantauLogo } from "@/components/pantau-logo"
+import { OrganizationStatusGuard } from "@/components/organization-status-guard"
 
 export default function PendingPage() {
-  const { status } = useSession()
-  const router = useRouter()
   const [signingOut, setSigningOut] = useState(false)
-
-  useEffect(() => {
-    if (status === "unauthenticated") { router.push("/login"); return }
-    if (status !== "authenticated") return
-
-    const check = async () => {
-      const res = await fetch("/api/org/status")
-      if (!res.ok) return
-      const { status: orgStatus } = await res.json()
-      if (orgStatus === "TRIAL" || orgStatus === "ACTIVE") router.push("/dashboard/owner")
-    }
-
-    check()
-    const interval = setInterval(check, 8000)
-    return () => clearInterval(interval)
-  }, [status, router])
 
   async function handleAccess() {
     setSigningOut(true)
-    await signOut({ redirectTo: "/login" })
+    await signOut({ redirect: false }); window.location.href = "/login"
   }
 
   return (
     <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
+      <OrganizationStatusGuard />
       <div className="max-w-sm w-full">
         <div className="flex items-center gap-2.5 justify-center mb-10">
-          <div className="w-9 h-9 bg-blue-600 rounded-xl flex items-center justify-center">
-            <BarChart3 className="w-5 h-5 text-white" />
-          </div>
+          <PantauLogo className="h-9 w-9" priority />
           <span className="text-xl font-bold text-slate-900 tracking-tight">Pantau</span>
         </div>
 

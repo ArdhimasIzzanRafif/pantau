@@ -29,7 +29,7 @@ export function getRoleName(role: string): string {
     OWNER: "Owner",
     ADMIN_GUDANG: "Admin Gudang",
     SUPERVISOR: "Supervisor",
-    EMPLOYEE: "Karyawan",
+    KASIR: "Kasir",
   }
   return map[role] ?? role
 }
@@ -39,7 +39,7 @@ export function getRoleColor(role: string): string {
     OWNER: "bg-purple-100 text-purple-700",
     ADMIN_GUDANG: "bg-blue-100 text-blue-700",
     SUPERVISOR: "bg-green-100 text-green-700",
-    EMPLOYEE: "bg-gray-100 text-gray-700",
+    KASIR: "bg-orange-100 text-orange-700",
   }
   return map[role] ?? "bg-gray-100 text-gray-700"
 }

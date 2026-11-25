@@ -41,7 +41,6 @@ dependencies:
 
   # Image pick & compress
   image_picker: ^1.1.2
-  flutter_image_compress: ^2.3.0
 
 dev_dependencies:
   flutter_test:

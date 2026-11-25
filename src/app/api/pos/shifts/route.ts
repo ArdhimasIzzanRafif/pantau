@@ -1,6 +1,9 @@
 import { NextRequest } from "next/server"
 import { prisma } from "@/lib/db"
 import { requireAuth, isResponse, ok, err } from "@/lib/api-helpers"
+import { canAccessLocation } from "@/lib/location-access"
+import { getHistoryScope } from "@/lib/history-scope"
+import { visibleShiftCash } from "@/lib/shift-cash-visibility"
 
 export async function GET(req: NextRequest) {
   const user = await requireAuth()
@@ -10,13 +13,28 @@ export async function GET(req: NextRequest) {
   const locationId = searchParams.get("locationId")
   const status     = searchParams.get("status")
   const mine       = searchParams.get("mine") === "true"
+  const history    = searchParams.get("history") === "1"
+  const from       = searchParams.get("from")
+  const to         = searchParams.get("to")
   const page       = Math.max(1, Number(searchParams.get("page") ?? 1))
   const take       = 30
+
+  const historyScope = await getHistoryScope(user, history)
+  if (!historyScope.allowed) return err("Tidak memiliki akses ke Riwayat", 403)
+  if (history && user.role !== "OWNER") return err("Riwayat shift hanya dapat dilihat Owner", 403)
 
   const where: Record<string, unknown> = { organizationId: user.organizationId }
   if (locationId) where.locationId = locationId
   if (status)     where.status = status
   if (mine)       where.cashierId = user.id
+  if (historyScope.actorId) where.cashierId = historyScope.actorId
+  // Sama seperti endpoint export: rentang tanggal dihitung dari waktu tutup shift.
+  if (from || to) {
+    where.closedAt = {
+      ...(from ? { gte: new Date(from) } : {}),
+      ...(to   ? { lte: new Date(to + "T23:59:59") } : {}),
+    }
+  }
 
   const [total, shifts] = await Promise.all([
     prisma.pOSShift.count({ where }),
@@ -32,7 +50,7 @@ export async function GET(req: NextRequest) {
     }),
   ])
 
-  return ok({ items: shifts, total, page, pages: Math.ceil(total / take) })
+  return ok({ items: shifts.map(shift => visibleShiftCash(shift, user.role)), total, page, pages: Math.ceil(total / take) })
 }
 
 export async function POST(req: NextRequest) {
@@ -48,11 +66,13 @@ export async function POST(req: NextRequest) {
     where: { id: locationId, organizationId: user.organizationId },
   })
   if (!location) return err("Lokasi tidak ditemukan", 404)
+  if (!(await canAccessLocation(user, locationId))) return err("Tidak ada akses ke outlet ini", 403)
 
   const myOpenShift = await prisma.pOSShift.findFirst({
-    where: { organizationId: user.organizationId, locationId, cashierId: user.id, status: "OPEN" },
+    where: { organizationId: user.organizationId, cashierId: user.id, status: "OPEN" },
+    include: { location: { select: { name: true } } },
   })
-  if (myOpenShift) return err("Kamu sudah punya shift yang sedang buka", 409)
+  if (myOpenShift) return err(`Kamu masih punya shift aktif di ${myOpenShift.location.name}`, 409)
 
   const today = new Date()
   const dateStr =

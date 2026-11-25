@@ -33,7 +33,7 @@ class _GoodsReceiptScreenState extends ConsumerState<GoodsReceiptScreen> {
         api.get('/api/locations'),
         api.get('/api/inventory'),
       ]);
-      _receipts  = (r[0] as List?) ?? [];
+      _receipts  = asList(r[0]);
       _locations = (r[1] as List?) ?? [];
       _inventory = (r[2] as List?) ?? [];
       if (_locId.isEmpty && _locations.isNotEmpty) _locId = _locations[0]['id'] as String;

@@ -24,10 +24,6 @@ async function main() {
     await tx.pOSPayment.deleteMany({ where: { order: { organizationId: orgId } } })
     await tx.pOSOrder.deleteMany({ where: { organizationId: orgId } })
     await tx.pOSShift.deleteMany({ where: { organizationId: orgId } })
-    // POS uploads
-    await tx.pOSSalesData.deleteMany({ where: { upload: { organizationId: orgId } } })
-    await tx.pOSUpload.deleteMany({ where: { organizationId: orgId } })
-    await tx.mappingTemplate.deleteMany({ where: { organizationId: orgId } })
     // Opname
     await tx.stockOpnameItem.deleteMany({ where: { opname: { organizationId: orgId } } })
     await tx.stockOpname.deleteMany({ where: { organizationId: orgId } })
@@ -38,7 +34,9 @@ async function main() {
     await tx.stockTransferItem.deleteMany({ where: { transfer: { organizationId: orgId } } })
     await tx.stockTransfer.deleteMany({ where: { organizationId: orgId } })
     // Stok
+    await tx.stockAdjustment.deleteMany({ where: { organizationId: orgId } })
     await tx.stockMovement.deleteMany({ where: { organizationId: orgId } })
+    await tx.stockBatch.deleteMany({ where: { organizationId: orgId } })
     await tx.inventoryLocationSetting.deleteMany({ where: { organizationId: orgId } })
     await tx.stockBalance.deleteMany({ where: { organizationId: orgId } })
     // Alerts & logs

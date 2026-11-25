@@ -47,9 +47,12 @@ export default function SystemPage() {
   }, [])
 
   useEffect(() => {
-    load()
-    const t = setInterval(() => load(true), 30000)
-    return () => clearInterval(t)
+    const timeoutId = window.setTimeout(() => { void load() }, 0)
+    const intervalId = window.setInterval(() => { void load(true) }, 30000)
+    return () => {
+      window.clearTimeout(timeoutId)
+      window.clearInterval(intervalId)
+    }
   }, [load])
 
   if (loading) return (

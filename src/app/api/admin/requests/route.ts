@@ -44,7 +44,7 @@ export async function PATCH(req: NextRequest) {
   const admin = await requireAdmin()
   if (!("email" in admin)) return admin as NextResponse
 
-  const { id, action, plan } = await req.json()
+  const { id, action } = await req.json()
   if (!id || !action) return NextResponse.json({ error: "id dan action wajib" }, { status: 400 })
 
   if (action === "approve") {
@@ -64,7 +64,7 @@ export async function PATCH(req: NextRequest) {
     const owner = org.users[0]?.user
     if (owner) {
       sendApprovalEmail({
-        ownerName: owner.name,
+        ownerName: owner.name ?? "Pemilik",
         ownerEmail: owner.email,
         businessName: org.name,
         trialEndsAt,

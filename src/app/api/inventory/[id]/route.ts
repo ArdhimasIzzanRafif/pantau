@@ -2,16 +2,14 @@ import { NextRequest } from "next/server"
 import type { Prisma } from "@prisma/client"
 import { prisma } from "@/lib/db"
 import { requireAuth, isResponse, ok, err } from "@/lib/api-helpers"
+import { denyUnlessCanEdit } from "@/lib/feature-access"
+import { checkAndCreateLowStockAlert } from "@/lib/stock-alerts"
+import { parseOptionalMinimumStock, QuantityInputError } from "@/lib/inventory-quantity"
+import { validateInventoryPackaging, UnitError } from "@/lib/unit-conversion"
+import { InventoryCostError, parseOptionalInventoryCost } from "@/lib/inventory-cost"
 
 function toAuditJson(value: unknown): Prisma.InputJsonValue {
   return JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue
-}
-
-function parseOptionalMinStock(value: unknown) {
-  if (value === undefined || value === null || value === "") return null
-  const parsed = Number(value)
-  if (!Number.isFinite(parsed) || parsed < 0) return null
-  return Math.trunc(parsed)
 }
 
 function parseLocationMinStocks(value: unknown): { toUpsert: { locationId: string; minStock: number }[]; toDelete: string[] } | null {
@@ -25,7 +23,7 @@ function parseLocationMinStocks(value: unknown): { toUpsert: { locationId: strin
     const locationId = (row as { locationId?: unknown }).locationId
     if (typeof locationId !== "string" || !locationId) continue
 
-    const minStock = parseOptionalMinStock((row as { minStock?: unknown }).minStock)
+    const minStock = parseOptionalMinimumStock((row as { minStock?: unknown }).minStock)
     if (minStock !== null) {
       toUpsert.push({ locationId, minStock })
     } else {
@@ -39,7 +37,8 @@ function parseLocationMinStocks(value: unknown): { toUpsert: { locationId: strin
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const user = await requireAuth()
   if (isResponse(user)) return user
-  if (user.role !== "OWNER") return err("Tidak diizinkan", 403)
+  const forbidden = await denyUnlessCanEdit(user, "MASTER_INVENTORY")
+  if (forbidden) return forbidden
 
   const { id } = await params
   const body = await req.json()
@@ -49,7 +48,20 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   })
   if (!item) return err("Item tidak ditemukan", 404)
 
-  const locationMinStocks = parseLocationMinStocks(body.locationMinStocks)
+
+  let locationMinStocks: ReturnType<typeof parseLocationMinStocks>
+  let packaging: ReturnType<typeof validateInventoryPackaging>
+  let parsedCostPrice = item.costPrice == null ? null : Number(item.costPrice)
+  try {
+    locationMinStocks = parseLocationMinStocks(body.locationMinStocks)
+    packaging = validateInventoryPackaging(body.unit ?? item.unit,
+      body.packSize !== undefined ? body.packSize : item.packSize?.toNumber(),
+      body.packUnit !== undefined ? body.packUnit : item.packUnit)
+    if (body.costPrice !== undefined) parsedCostPrice = parseOptionalInventoryCost(body.costPrice)
+  } catch (error) {
+    if (error instanceof UnitError || error instanceof QuantityInputError || error instanceof InventoryCostError) return err(error.message)
+    throw error
+  }
   if (locationMinStocks) {
     const allIds = [...locationMinStocks.toUpsert.map((r) => r.locationId), ...locationMinStocks.toDelete]
     if (allIds.length > 0) {
@@ -68,10 +80,9 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
         sku: body.sku !== undefined ? body.sku : item.sku,
         category: body.category !== undefined ? body.category : item.category,
         unit: body.unit ?? item.unit,
-        packSize: body.packSize !== undefined ? (body.packSize ? parseInt(body.packSize) : null) : item.packSize,
-        packUnit: body.packUnit !== undefined ? (body.packUnit || null) : item.packUnit,
-        costPrice: body.costPrice !== undefined ? (body.costPrice ? parseFloat(body.costPrice) : null) : item.costPrice,
-        minStock: body.minStock !== undefined ? parseOptionalMinStock(body.minStock) : item.minStock,
+        ...packaging,
+        costPrice: parsedCostPrice,
+        minStock: null,
         isTrackable: body.isTrackable !== undefined ? body.isTrackable : item.isTrackable,
         isActive: body.isActive !== undefined ? body.isActive : item.isActive,
         notes: body.notes !== undefined ? body.notes : item.notes,
@@ -92,6 +103,9 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
           create: { organizationId: user.organizationId, itemId: id, locationId, minStock },
           update: { minStock },
         })
+        // Ambang baru bisa langsung terlampaui oleh stok yang sudah ada:
+        // buat peringatan (dan WA) sekarang, jangan menunggu transaksi berikutnya.
+        await checkAndCreateLowStockAlert(tx, user.organizationId, id, locationId)
       }
     }
 
@@ -116,7 +130,8 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const user = await requireAuth()
   if (isResponse(user)) return user
-  if (user.role !== "OWNER") return err("Tidak diizinkan", 403)
+  const forbidden = await denyUnlessCanEdit(user, "MASTER_INVENTORY")
+  if (forbidden) return forbidden
 
   const { id } = await params
 
@@ -129,6 +144,7 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
     },
   })
   if (!item) return err("Item tidak ditemukan", 404)
+
 
   if (item.usedInRecipes.length > 0) {
     const menuNames = [...new Set(item.usedInRecipes.map((r) => r.parentItem.name))].join(", ")

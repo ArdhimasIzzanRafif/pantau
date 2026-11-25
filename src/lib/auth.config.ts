@@ -11,6 +11,7 @@ export const authConfig: NextAuthConfig = {
       if (user) {
         token.id = user.id
         token.email = user.email
+        token.picture = user.image
         token.organizationId = (user as unknown as Record<string, unknown>).organizationId
         token.role = (user as unknown as Record<string, unknown>).role
         token.businessName = (user as unknown as Record<string, unknown>).businessName
@@ -25,6 +26,7 @@ export const authConfig: NextAuthConfig = {
       if (token) {
         session.user.id = token.id as string
         if (token.email) session.user.email = token.email as string
+        session.user.image = typeof token.picture === "string" ? token.picture : null
         ;(session.user as unknown as Record<string, unknown>).organizationId = token.organizationId
         ;(session.user as unknown as Record<string, unknown>).role = token.role
         ;(session.user as unknown as Record<string, unknown>).businessName = token.businessName

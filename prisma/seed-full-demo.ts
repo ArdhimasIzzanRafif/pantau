@@ -59,7 +59,7 @@ async function main() {
 
   // ── Meja (fitur QR meja terkunci) ───────────────────────────────────────
   const tableDefs = ["Meja 1", "Meja 2", "Meja 3"]
-  const tables: Record<string, { id: string; tableToken: string }> = {}
+  const tables: Record<string, { id: string; name: string; tableToken: string }> = {}
   for (const [i, name] of tableDefs.entries()) {
     const t = await prisma.table.upsert({
       where: { id: org.id + "_table" + i },
@@ -192,8 +192,8 @@ async function main() {
         supplier: "CV Sumber Pangan", status: "CONFIRMED", createdById: user.id,
         items: {
           create: [
-            { itemId: items["BP-001"].id, quantity: 100, costPrice: 15000 },
-            { itemId: items["BB-001"].id, quantity: 150, costPrice: 3500 },
+            { itemId: items["BP-001"].id, quantity: 100, costPrice: 15000, purchaseQuantity: 100, purchaseUnit: "pcs", purchaseUnitCost: 15000, lineTotal: 1500000 },
+            { itemId: items["BB-001"].id, quantity: 150, costPrice: 3500, purchaseQuantity: 150, purchaseUnit: "pcs", purchaseUnitCost: 3500, lineTotal: 525000 },
           ],
         },
       },

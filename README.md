@@ -2,6 +2,10 @@ This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-
 
 ## Getting Started
 
+For Pantau deployment to a Hostinger temporary domain, see
+[Deployment Hostinger](docs/DEPLOY-HOSTINGER.md). Environment variable names are
+listed in `.env.example`; keep real secrets outside Git.
+
 First, run the development server:
 
 ```bash

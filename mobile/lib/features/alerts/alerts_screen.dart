@@ -40,32 +40,31 @@ class _AlertsScreenState extends ConsumerState<AlertsScreen> {
 
   Color _severityBorder(String s) {
     switch (s) {
-      case 'CRITICAL': return AppTheme.danger;
-      case 'WARNING':  return AppTheme.warning;
-      default:         return AppTheme.primary;
+      // Hanya dua tingkat: Info dan Kritis. Baris lama bersever WARNING masih
+      // mungkin ada di database, jadi ikut diperlakukan sebagai kritis.
+      case 'INFO': return AppTheme.primary;
+      default:     return AppTheme.danger;
     }
   }
 
   Color _severityDot(String s) {
     switch (s) {
-      case 'CRITICAL': return AppTheme.danger;
-      case 'WARNING':  return AppTheme.warning;
-      default:         return AppTheme.primary;
+      case 'INFO': return AppTheme.primary;
+      default:     return AppTheme.danger;
     }
   }
 
   String _severityLabel(String s) {
     switch (s) {
-      case 'CRITICAL': return 'Kritis';
-      case 'WARNING':  return 'Perhatian';
-      default:         return 'Info';
+      case 'INFO': return 'Info';
+      default:     return 'Kritis';
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final critical   = _alerts.where((a) => a['severity'] == 'CRITICAL').length;
-    final warning    = _alerts.where((a) => a['severity'] == 'WARNING').length;
+    final critical = _alerts.where((a) => a['severity'] != 'INFO').length;
+    final info     = _alerts.where((a) => a['severity'] == 'INFO').length;
 
     return Scaffold(
       backgroundColor: AppTheme.surface,
@@ -89,7 +88,7 @@ class _AlertsScreenState extends ConsumerState<AlertsScreen> {
           Row(children: [
             _summCard('Kritis', critical, AppTheme.danger, const Color(0xFFFEF2F2)),
             const SizedBox(width: 10),
-            _summCard('Perhatian', warning, AppTheme.warning, const Color(0xFFFFFBEB)),
+            _summCard('Info', info, AppTheme.primary, const Color(0xFFEFF6FF)),
             const SizedBox(width: 10),
             _summCard('Total', _alerts.length, AppTheme.textSecondary, const Color(0xFFF8FAFC)),
           ]),

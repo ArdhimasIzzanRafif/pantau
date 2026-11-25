@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server"
 import { prisma } from "@/lib/db"
 import { requireAuth, isResponse, ok, err } from "@/lib/api-helpers"
+import { restoreOrderStock } from "@/lib/pos-orders"
 
 export async function POST(
   req: NextRequest,
@@ -27,40 +28,13 @@ export async function POST(
     })
 
     if (order.status === "PAID") {
-      for (const item of order.items) {
-        if (!item.menuItemId) continue
-        const recipeItems = await tx.recipeItem.findMany({
-          where: { parentItemId: item.menuItemId },
-        })
-
-        for (const recipe of recipeItems) {
-          const restoreQty = Number(recipe.quantity) * item.qty
-
-          await tx.stockMovement.create({
-            data: {
-              organizationId: user.organizationId,
-              itemId: recipe.childItemId,
-              locationId: order.locationId,
-              type: "POS_SALE",
-              quantity: restoreQty,
-              note: `VOID: ${item.name} × ${item.qty} — ${reason ?? ""}`,
-              referenceId: id,
-              createdById: user.id,
-            },
-          })
-
-          await tx.stockBalance.upsert({
-            where: { itemId_locationId: { itemId: recipe.childItemId, locationId: order.locationId } },
-            update: { quantity: { increment: restoreQty } },
-            create: {
-              organizationId: user.organizationId,
-              itemId: recipe.childItemId,
-              locationId: order.locationId,
-              quantity: restoreQty,
-            },
-          })
-        }
-      }
+      await restoreOrderStock(tx, {
+        organizationId: user.organizationId,
+        orderId: id,
+        locationId: order.locationId,
+        createdById: user.id,
+        reason: typeof reason === "string" ? reason : null,
+      })
 
       if (order.shiftId) {
         await tx.pOSShift.update({

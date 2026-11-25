@@ -251,8 +251,8 @@ class _OpnameTabState extends State<_OpnameTab> with AutomaticKeepAliveClientMix
   Future<void> _load() async {
     setState(() => _loading = true);
     try {
-      final res = await api.get('/api/opnames') as List?;
-      if (mounted) setState(() { _items = res ?? []; _loading = false; });
+      final res = asList(await api.get('/api/opnames'));
+      if (mounted) setState(() { _items = res; _loading = false; });
     } catch (_) { if (mounted) setState(() => _loading = false); }
   }
 
@@ -315,8 +315,8 @@ class _TransferTabState extends State<_TransferTab> with AutomaticKeepAliveClien
   Future<void> _load() async {
     setState(() => _loading = true);
     try {
-      final res = await api.get('/api/transfers') as List?;
-      if (mounted) setState(() { _items = res ?? []; _loading = false; });
+      final res = asList(await api.get('/api/transfers'));
+      if (mounted) setState(() { _items = res; _loading = false; });
     } catch (_) { if (mounted) setState(() => _loading = false); }
   }
 
@@ -382,7 +382,7 @@ class _ReceiptTabState extends State<_ReceiptTab> with AutomaticKeepAliveClientM
         if (_locations.isEmpty) api.get('/api/locations'),
       ]);
       if (mounted) setState(() {
-        _items = (results[0] as List?) ?? [];
+        _items = asList(results[0]);
         if (results.length > 1) _locations = (results[1] as List?) ?? [];
         _loading = false;
       });

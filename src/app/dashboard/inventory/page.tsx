@@ -1,6 +1,13 @@
 "use client"
 
-import { useState, useEffect, useRef } from "react"
+import { useState, useEffect, useRef, useCallback } from "react"
+import { Pagination } from "@/components/ui/pagination"
+import { FormAlert } from "@/components/ui/form-alert"
+import { ConfirmModal } from "@/components/ui/confirm-modal"
+import { StableDraftInput } from "@/components/ui/stable-draft-input"
+import { useCanEdit, DISABLED_ACTION_CLASS, NO_EDIT_PERMISSION_TITLE } from "@/lib/use-can-edit"
+import { useLiveRefresh } from "@/lib/use-live-refresh"
+import { costPerBaseUnit, formatInventoryQuantity, multiplyInventoryQuantity, parseInventoryDecimal, parseInventoryQuantity, quantityInPackages, QuantityInputError } from "@/lib/inventory-quantity"
 import {
   Plus,
   Search,
@@ -12,6 +19,9 @@ import {
   Loader2,
   X,
 } from "lucide-react"
+
+const ALASAN_TERKUNCI = NO_EDIT_PERMISSION_TITLE
+const AKSI_NONAKTIF = `${DISABLED_ACTION_CLASS} disabled:hover:text-slate-400`
 
 type ConfirmDialog = { id: string; name: string } | null
 
@@ -43,28 +53,94 @@ type Item = {
 }
 
 const UNITS = ["botol", "bungkus", "butir", "gram", "ikat", "kaleng", "kg", "lembar", "liter", "ml", "pcs", "potong", "sachet"]
-const PACK_UNITS = ["ball", "box", "drum", "dus", "galon", "jerigen", "karton", "karung", "krat", "lusin", "pack", "peti", "renteng", "roll", "sak", "toples"]
+const PACK_UNITS = ["ball", "box", "drum", "dus", "galon", "jerigen", "karton", "karung", "krat", "lusin", "pack", "pcs", "peti", "renteng", "roll", "sak", "toples"]
 const DEFAULT_CATEGORIES = ["Bahan Baku", "Kemasan", "Makanan", "Minuman"]
 
-function formatRpInput(val: string) {
+// Angka besar lebih mudah dibaca dengan pemisah ribuan (1000 → "1.000").
+// <input type="number"> tidak bisa menampilkan pemisah, jadi kolom yang memakai
+// ini harus type="text" + inputMode="numeric".
+function formatNumberInput(val: string) {
   const digits = val.replace(/\D/g, "")
   if (!digits) return ""
   return Number(digits).toLocaleString("id-ID")
 }
-function parseRpInput(val: string) {
+function parseNumberInput(val: string) {
   return val.replace(/\./g, "").replace(/,/g, "")
 }
 
 function stockInputFromBase(minStock: number | null, packSize: number | null) {
   if (minStock == null) return ""
-  return packSize ? String(Math.round(minStock / packSize)) : String(minStock)
+  return formatInventoryQuantity(packSize ? quantityInPackages(minStock, packSize) : minStock)
 }
 
 function stockInputToBase(value: string, packSize: string) {
-  if (value === "") return null
-  const parsed = Number(value)
-  if (!Number.isFinite(parsed)) return null
-  return parsed * (packSize ? Number(packSize) : 1)
+  if (!value.trim()) return null
+  const parsed = parseInventoryQuantity(value, "Minimum stok", true)
+  const perPack = parseInventoryDecimal(packSize)
+  return multiplyInventoryQuantity(parsed, perPack != null && perPack > 0 ? perPack : 1)
+}
+
+function MinimumStockInput({
+  value,
+  onCommit,
+  placeholder,
+  ariaLabel,
+  tone = "slate",
+}: {
+  value: string
+  onCommit: (value: string) => void
+  placeholder: string
+  ariaLabel: string
+  tone?: "slate" | "blue"
+}) {
+  // Draft lokal mencegah seluruh modal dan semua baris lokasi dirender ulang
+  // pada setiap digit. Nilai baru disinkronkan ketika pengguna selesai dari
+  // kolom, sehingga fokus dan posisi scroll tetap stabil.
+  return (
+    <StableDraftInput
+      type="text"
+      inputMode="decimal"
+      aria-label={ariaLabel}
+      placeholder={placeholder}
+      value={value}
+      onCommit={onCommit}
+      className={`h-10 w-full appearance-none rounded-lg bg-white pl-3 pr-16 text-sm tabular-nums focus:outline-none focus:ring-4 ${
+        tone === "blue"
+          ? "border border-blue-200 focus:border-blue-400 focus:ring-blue-100"
+          : "border border-slate-200 focus:border-blue-400 focus:ring-blue-50"
+      }`}
+    />
+  )
+}
+
+function CostPriceInput({
+  value,
+  onCommit,
+  inputRef,
+  ariaLabel,
+}: {
+  value: string
+  onCommit: (value: string) => void
+  inputRef: React.RefObject<HTMLInputElement | null>
+  ariaLabel: string
+}) {
+  // Harga pokok sebelumnya menulis ke state form induk pada setiap digit.
+  // Akibatnya seluruh isi modal—termasuk semua lokasi—ikut dirender ulang.
+  // Draft lokal membuat ketikan hanya merender ulang input ini.
+  return (
+    <StableDraftInput
+      ref={inputRef}
+      type="text"
+      inputMode="numeric"
+      required
+      aria-label={ariaLabel}
+      placeholder="Contoh: 35.000"
+      value={value}
+      formatValue={formatNumberInput}
+      onCommit={onCommit}
+      className="h-11 w-full rounded-xl border border-slate-200 pl-9 pr-4 text-sm tabular-nums focus:border-blue-400 focus:outline-none focus:ring-4 focus:ring-blue-50"
+    />
+  )
 }
 
 async function readApiError(res: Response, fallback: string) {
@@ -94,6 +170,7 @@ const emptyForm = {
 }
 
 export default function InventoryPage() {
+  const canEdit = useCanEdit("MASTER_INVENTORY")
   const [items, setItems] = useState<Item[]>([])
   const [locations, setLocations] = useState<Location[]>([])
   const [loading, setLoading] = useState(true)
@@ -102,6 +179,9 @@ export default function InventoryPage() {
   const [showModal, setShowModal] = useState(false)
   const [editItem, setEditItem] = useState<Item | null>(null)
   const [form, setForm] = useState(emptyForm)
+  const [showPackaging, setShowPackaging] = useState(false)
+  const [packagingChangeNotice, setPackagingChangeNotice] = useState("")
+  const packagingRestoreRef = useRef<{ costPrice: string; locationMinStocks: Record<string, string>; allLocationsMinStock: string } | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState("")
   const [confirmDelete, setConfirmDelete] = useState<ConfirmDialog>(null)
@@ -120,8 +200,20 @@ export default function InventoryPage() {
   const [packUnitOpen, setPackUnitOpen] = useState(false)
   const packUnitRef = useRef<HTMLDivElement>(null)
   const packUnitSearchRef = useRef<HTMLInputElement>(null)
+  const packSizeRef = useRef<HTMLInputElement>(null)
+  const priceRef = useRef<HTMLInputElement>(null)
   const [customPackUnits, setCustomPackUnits] = useState<string[]>([])
+  const [page, setPage] = useState(1)
+  const [pages, setPages] = useState(1)
+  const [total, setTotal] = useState(0)
+  const [totalAll, setTotalAll] = useState(0)
+  const [missingCost, setMissingCost] = useState(0)
+  const [serverCategories, setServerCategories] = useState<string[]>([])
+  const listRef = useRef<HTMLDivElement>(null)
+  // Pencarian ditunda sebentar supaya tiap ketikan tidak memanggil server.
+  const [debouncedSearch, setDebouncedSearch] = useState("")
   const [locationMinStocks, setLocationMinStocks] = useState<Record<string, string>>({})
+  const [allLocationsMinStock, setAllLocationsMinStock] = useState("")
 
   useEffect(() => {
     function handleClick(e: MouseEvent) {
@@ -133,12 +225,38 @@ export default function InventoryPage() {
     return () => document.removeEventListener("mousedown", handleClick)
   }, [])
 
-  async function fetchItems() {
-    setLoading(true)
-    const res = await fetch("/api/inventory")
-    if (res.ok) setItems(await res.json())
+  // Kolom pencarian dropdown difokuskan otomatis hanya di perangkat ber-mouse.
+  // Di layar sentuh, fokus paksa memunculkan keyboard dan membuat Safari
+  // menggulirkan form ke posisi kolom itu — form terlihat melompat sendiri.
+  useEffect(() => {
+    if (!unitOpen && !packUnitOpen && !categoryOpen) return
+    if (window.matchMedia("(pointer: coarse)").matches) return
+    const timeoutId = window.setTimeout(() => {
+      if (unitOpen) unitSearchRef.current?.focus({ preventScroll: true })
+      else if (packUnitOpen) packUnitSearchRef.current?.focus({ preventScroll: true })
+      else if (categoryOpen) categorySearchRef.current?.focus({ preventScroll: true })
+    }, 0)
+    return () => window.clearTimeout(timeoutId)
+  }, [unitOpen, packUnitOpen, categoryOpen])
+
+  const fetchItems = useCallback(async (nextPage = 1, { silent = false } = {}) => {
+    if (!silent) setLoading(true)
+    const p = new URLSearchParams({ page: String(nextPage) })
+    if (debouncedSearch)      p.set("search",   debouncedSearch)
+    if (category !== "Semua") p.set("category", category)
+    const res = await fetch(`/api/inventory?${p}`)
+    if (res.ok) {
+      const data = await res.json()
+      setItems(data.items)
+      setPage(data.page)
+      setPages(data.pages)
+      setTotal(data.total)
+      setTotalAll(data.totalAll)
+      setMissingCost(data.missingCost)
+      setServerCategories(data.categories)
+    }
     setLoading(false)
-  }
+  }, [debouncedSearch, category])
 
   async function fetchLocations() {
     const res = await fetch("/api/locations")
@@ -146,25 +264,33 @@ export default function InventoryPage() {
   }
 
   useEffect(() => {
-    const timeoutId = window.setTimeout(() => {
-      fetchItems()
-      fetchLocations()
-    }, 0)
+    const timeoutId = window.setTimeout(() => { fetchLocations() }, 0)
     return () => window.clearTimeout(timeoutId)
   }, [])
 
-  const filtered = items.filter((item) => {
-    const matchSearch =
-      item.name.toLowerCase().includes(search.toLowerCase()) ||
-      (item.sku?.toLowerCase().includes(search.toLowerCase()) ?? false)
-    const matchCat = category === "Semua" || item.category === category
-    return matchSearch && matchCat
-  })
+
+  useEffect(() => {
+    const timeoutId = window.setTimeout(() => setDebouncedSearch(search), 300)
+    return () => window.clearTimeout(timeoutId)
+  }, [search])
+
+  // Pencarian dan kategori disaring di server, jadi daftar dimuat ulang saat berubah.
+  useEffect(() => {
+    const timeoutId = window.setTimeout(() => { void fetchItems() }, 0)
+    return () => window.clearTimeout(timeoutId)
+  }, [fetchItems])
+
+  // Item yang ditambah pengguna lain ikut muncul tanpa memuat ulang halaman.
+  useLiveRefresh(() => { void fetchItems(page, { silent: true }) })
 
   function openCreate() {
     setEditItem(null)
     setForm(emptyForm)
+    setShowPackaging(false)
+    setPackagingChangeNotice("")
+    packagingRestoreRef.current = null
     setLocationMinStocks({})
+    setAllLocationsMinStock("")
     setError("")
     setUnitSearch("")
     setUnitOpen(false)
@@ -177,20 +303,23 @@ export default function InventoryPage() {
 
   function openEdit(item: Item) {
     setEditItem(item)
+    setShowPackaging(item.packUnit != null || item.packSize != null)
+    setPackagingChangeNotice("")
+    packagingRestoreRef.current = null
     setForm({
       name: item.name,
       sku: item.sku ?? "",
       category: item.category ?? "",
       unit: item.unit,
-      packSize: item.packSize != null ? String(item.packSize) : "",
+      packSize: item.packSize != null ? formatInventoryQuantity(item.packSize) : "",
       packUnit: item.packUnit ?? "",
       // Tampilkan harga per kemasan agar user edit dalam satuan yang sama saat input
       costPrice: item.costPrice != null
-        ? formatRpInput(item.packSize
+        ? formatNumberInput(item.packSize
           ? String(Math.round(Number(item.costPrice) * item.packSize))
           : String(Math.round(Number(item.costPrice))))
         : "",
-      minStock: stockInputFromBase(item.minStock, item.packSize),
+      minStock: "",
       isTrackable: item.isTrackable,
       isActive: item.isActive,
     })
@@ -199,6 +328,12 @@ export default function InventoryPage() {
       nextLocationMinStocks[setting.locationId] = stockInputFromBase(setting.minStock, item.packSize)
     }
     setLocationMinStocks(nextLocationMinStocks)
+    const locationValues = locations.map((location) => nextLocationMinStocks[location.id] ?? "")
+    setAllLocationsMinStock(
+      locationValues.length > 0 && locationValues.every((value) => value === locationValues[0])
+        ? locationValues[0]
+        : ""
+    )
     setError("")
     setUnitSearch("")
     setUnitOpen(false)
@@ -211,8 +346,31 @@ export default function InventoryPage() {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
-    setSubmitting(true)
     setError("")
+
+    const packSize = parseInventoryDecimal(form.packSize) ?? NaN
+    if (showPackaging && !form.packUnit.trim()) {
+      setError("Pilih jenis kemasan atau hapus bagian kemasan.")
+      packUnitRef.current?.querySelector("button")?.focus({ preventScroll: true })
+      return
+    }
+    if (showPackaging) {
+      try { parseInventoryQuantity(form.packSize, "Isi per kemasan") }
+      catch (error) {
+        setError(error instanceof Error ? error.message : "Isi per kemasan tidak valid")
+        packSizeRef.current?.focus({ preventScroll: true })
+        return
+      }
+    }
+
+    const enteredCost = Number(parseNumberInput(form.costPrice))
+    if (!form.costPrice || !Number.isFinite(enteredCost) || enteredCost < 0) {
+      setError("Harga pokok wajib diisi dan tidak boleh negatif. Gunakan Rp0 untuk bahan gratis.")
+      priceRef.current?.focus({ preventScroll: true })
+      return
+    }
+
+    setSubmitting(true)
 
     try {
       const body: Record<string, unknown> = {
@@ -220,15 +378,11 @@ export default function InventoryPage() {
         sku: form.sku || null,
         category: form.category || null,
         unit: form.unit,
-        packSize: form.packSize ? Number(form.packSize) : null,
-        packUnit: form.packUnit || null,
+        packSize: showPackaging ? packSize : null,
+        packUnit: showPackaging ? form.packUnit.trim() : null,
         // Jika ada packSize, harga diinput per kemasan → konversi ke per satuan dasar
-        costPrice: form.costPrice
-          ? form.packSize
-            ? Number(parseRpInput(form.costPrice)) / Number(form.packSize)
-            : Number(parseRpInput(form.costPrice))
-          : null,
-        minStock: stockInputToBase(form.minStock, form.packSize),
+        costPrice: showPackaging ? costPerBaseUnit(enteredCost, packSize) : enteredCost,
+        minStock: null,
         isTrackable: form.isTrackable,
         isActive: form.isActive,
       }
@@ -236,7 +390,7 @@ export default function InventoryPage() {
       if (locations.length > 0) {
         body.locationMinStocks = locations.map((location) => ({
           locationId: location.id,
-          minStock: stockInputToBase(locationMinStocks[location.id] ?? "", form.packSize),
+          minStock: stockInputToBase(locationMinStocks[location.id] ?? "", showPackaging ? form.packSize : ""),
         }))
       }
 
@@ -258,8 +412,8 @@ export default function InventoryPage() {
       } else {
         setError(await readApiError(res, "Gagal menyimpan item"))
       }
-    } catch {
-      setError("Koneksi gagal, coba lagi")
+    } catch (error) {
+      setError(error instanceof QuantityInputError ? error.message : "Koneksi gagal, coba lagi")
     } finally {
       setSubmitting(false)
     }
@@ -274,37 +428,46 @@ export default function InventoryPage() {
     if (!confirmDelete) return
     setDeleting(true)
     setDeleteError("")
-    const res = await fetch(`/api/inventory/${confirmDelete.id}`, { method: "DELETE" })
-    if (res.ok) {
-      setConfirmDelete(null)
-      fetchItems()
-    } else {
-      setDeleteError(await readApiError(res, "Gagal menghapus item"))
+    try {
+      const res = await fetch(`/api/inventory/${confirmDelete.id}`, { method: "DELETE" })
+      if (res.ok) {
+        setConfirmDelete(null)
+        void fetchItems()
+      } else {
+        setDeleteError(await readApiError(res, "Gagal menghapus item"))
+      }
+    } catch {
+      setDeleteError("Koneksi gagal, coba lagi")
+    } finally {
+      setDeleting(false)
     }
-    setDeleting(false)
   }
 
   const formatRp = (n: number | null) =>
     n == null ? "—" : `Rp ${n.toLocaleString("id-ID")}`
 
-  const missingCost = items.filter((i) => !i.costPrice && i.isTrackable).length
-  const uniqueCategories = Array.from(new Set(items.map((i) => i.category).filter(Boolean))) as string[]
-  const allCategories = ["Semua", ...uniqueCategories.sort()]
+  const uniqueCategories = serverCategories
+  const allCategories = ["Semua", ...uniqueCategories]
+  const parsedPackSize = parseInventoryDecimal(form.packSize)
+  const hasCompletePackaging = showPackaging && !!form.packUnit && parsedPackSize != null && parsedPackSize > 0 && parsedPackSize < 1e12 && Number(parsedPackSize.toFixed(3)) === parsedPackSize
+  const inputUnit = showPackaging ? (form.packUnit || "kemasan") : form.unit
 
   return (
-    <div className="max-w-6xl mx-auto space-y-5">
+    <div className="mx-auto w-full max-w-6xl space-y-5 sm:space-y-6">
       {/* Page header */}
-      <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <h1 className="text-2xl font-light text-slate-900 tracking-tight">Master Inventori</h1>
           <p className="text-sm text-slate-400 mt-0.5">
-            {items.length} item terdaftar
+            {totalAll} item terdaftar
             {missingCost > 0 && <span className="text-orange-500 ml-1">· {missingCost} tanpa harga pokok</span>}
           </p>
         </div>
         <button
           onClick={openCreate}
-          className="flex items-center gap-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-full transition-colors"
+          disabled={!canEdit}
+          title={canEdit ? undefined : ALASAN_TERKUNCI}
+          className="flex w-full items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-blue-600 sm:w-auto sm:rounded-full"
         >
           <Plus className="w-4 h-4" />
           Tambah Item
@@ -312,19 +475,19 @@ export default function InventoryPage() {
       </div>
 
       {missingCost > 0 && (
-        <div className="bg-white border border-orange-200 border-l-4 border-l-orange-500 rounded-2xl p-4 flex items-center gap-3">
-          <div className="w-8 h-8 bg-orange-100 rounded-xl flex items-center justify-center shrink-0">
+        <div className="flex items-start gap-3 rounded-2xl border border-l-4 border-orange-200 border-l-orange-500 bg-white p-4">
+          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-orange-100">
             <AlertTriangle className="w-4 h-4 text-orange-600" />
           </div>
-          <div>
-            <span className="text-sm font-semibold text-orange-800">{missingCost} item belum ada harga pokok —</span>
-            <span className="text-sm text-orange-600 ml-1">estimasi kerugian tidak akan akurat.</span>
+          <div className="min-w-0 text-sm leading-relaxed">
+            <span className="font-semibold text-orange-800">{missingCost} item belum ada harga pokok.</span>{" "}
+            <span className="text-orange-600">Estimasi kerugian belum dapat dihitung secara akurat.</span>
           </div>
         </div>
       )}
 
       {/* Search + filter */}
-      <div className="flex flex-col sm:flex-row gap-3">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
         <div className="relative flex-1">
           <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
           <input
@@ -332,10 +495,10 @@ export default function InventoryPage() {
             placeholder="Cari nama item atau SKU..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-slate-200 bg-white text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="h-11 w-full rounded-xl border border-slate-200 bg-white pl-10 pr-4 text-sm text-slate-900 placeholder:text-slate-400 focus:border-blue-400 focus:outline-none focus:ring-4 focus:ring-blue-50"
           />
         </div>
-        <div className="flex gap-1.5 overflow-x-auto">
+        <div className="flex max-w-full gap-1.5 overflow-x-auto pb-1 sm:pb-0">
           {allCategories.map((cat) => (
             <button
               key={cat}
@@ -353,15 +516,15 @@ export default function InventoryPage() {
       </div>
 
       {/* Table */}
-      <div className="bg-white rounded-2xl border border-slate-200 overflow-x-auto">
+      <div ref={listRef} className="scroll-mt-24 overflow-hidden rounded-2xl border border-slate-200 bg-white">
         {loading ? (
           <div className="flex items-center justify-center py-16">
             <div className="w-8 h-8 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
           </div>
         ) : (
           <>
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
+            <div className="hidden overflow-x-auto xl:block">
+              <table className="min-w-[1040px] w-full text-sm">
                 <thead>
                   <tr className="bg-slate-900">
                     <th className="text-left text-xs font-semibold text-slate-300 px-5 py-3.5">Nama Item</th>
@@ -375,7 +538,7 @@ export default function InventoryPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {filtered.map((item, idx) => (
+                  {items.map((item, idx) => (
                     <tr key={item.id} className={`hover:bg-blue-50/40 transition-colors ${idx % 2 !== 0 ? "bg-slate-50/50" : ""}`}>
                       <td className="px-5 py-3.5">
                         <div className="font-semibold text-slate-900 text-[13px]">{item.name}</div>
@@ -383,7 +546,7 @@ export default function InventoryPage() {
                           {item.unit}
                           {item.packSize && item.packUnit && (
                             <span className="ml-1.5 bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded-md text-[10px]">
-                              1 {item.packUnit} = {item.packSize} {item.unit}
+                              1 {item.packUnit} = {formatInventoryQuantity(item.packSize)} {item.unit}
                             </span>
                           )}
                         </div>
@@ -399,16 +562,13 @@ export default function InventoryPage() {
                         )}
                       </td>
                       <td className="px-5 py-3.5 text-right">
-                        {item.costPrice ? (
+                        {item.costPrice != null ? (
                           <div>
                             <div className="text-slate-900 text-[13px]">
                               {item.packSize && item.packUnit
                                 ? `${formatRp(Math.round(item.costPrice * item.packSize))}/${item.packUnit}`
                                 : `${formatRp(item.costPrice)}/${item.unit}`}
                             </div>
-                            {item.packSize && item.packUnit && (
-                              <div className="text-xs text-slate-400">{formatRp(item.costPrice)}/{item.unit}</div>
-                            )}
                           </div>
                         ) : item.isTrackable ? (
                           <span className="text-orange-500 text-xs font-semibold flex items-center justify-end gap-1">
@@ -419,31 +579,12 @@ export default function InventoryPage() {
                         )}
                       </td>
                       <td className="px-5 py-3.5 text-right text-slate-700">
-                        {item.minStock != null ? (
-                          <div>
-                            <div className="text-[13px]">
-                              {item.packSize && item.packUnit
-                                ? `${Math.round(item.minStock / item.packSize)} ${item.packUnit}`
-                                : `${item.minStock} ${item.unit}`}
-                            </div>
-                            {item.packSize && item.packUnit && (
-                              <div className="text-xs text-slate-400">= {item.minStock} {item.unit}</div>
-                            )}
-                            {(item.locationSettings?.filter((setting) => setting.minStock != null).length ?? 0) > 0 && (
-                              <div className="text-xs text-blue-600 mt-0.5">
-                                {item.locationSettings?.filter((setting) => setting.minStock != null).length} lokasi khusus
-                              </div>
-                            )}
+                        {(item.locationSettings?.filter((setting) => setting.minStock != null).length ?? 0) > 0 ? (
+                          <div className="text-xs font-medium text-blue-600">
+                            {item.locationSettings?.filter((setting) => setting.minStock != null).length} lokasi diatur
                           </div>
                         ) : (
-                          <div>
-                            <span className="text-slate-300 text-[13px]">—</span>
-                            {(item.locationSettings?.filter((setting) => setting.minStock != null).length ?? 0) > 0 && (
-                              <div className="text-xs text-blue-600 mt-0.5">
-                                {item.locationSettings?.filter((setting) => setting.minStock != null).length} lokasi khusus
-                              </div>
-                            )}
-                          </div>
+                          <span className="text-xs text-slate-400">Belum diatur</span>
                         )}
                       </td>
                       <td className="px-5 py-3.5 text-center">
@@ -464,13 +605,19 @@ export default function InventoryPage() {
                         <div className="flex items-center justify-end gap-1">
                           <button
                             onClick={() => openEdit(item)}
-                            className="p-1.5 hover:bg-blue-50 rounded-lg transition-colors text-slate-400 hover:text-blue-600"
+                            disabled={!canEdit}
+                            title={canEdit ? undefined : ALASAN_TERKUNCI}
+                            aria-label={`Edit ${item.name}`}
+                            className={`p-1.5 rounded-lg transition-colors text-slate-400 ${AKSI_NONAKTIF} hover:bg-blue-50 hover:text-blue-600`}
                           >
                             <Edit className="w-3.5 h-3.5" />
                           </button>
                           <button
                             onClick={() => openDelete(item.id, item.name)}
-                            className="p-1.5 hover:bg-red-50 rounded-lg transition-colors text-slate-400 hover:text-red-500"
+                            disabled={!canEdit}
+                            title={canEdit ? undefined : ALASAN_TERKUNCI}
+                            aria-label={`Hapus ${item.name}`}
+                            className={`p-1.5 rounded-lg transition-colors text-slate-400 ${AKSI_NONAKTIF} hover:bg-red-50 hover:text-red-500`}
                           >
                             <Trash2 className="w-3.5 h-3.5" />
                           </button>
@@ -481,110 +628,180 @@ export default function InventoryPage() {
                 </tbody>
               </table>
             </div>
-            {filtered.length === 0 && (
-              <div className="py-20 text-center">
+            <div className="divide-y divide-slate-100 xl:hidden">
+              {items.map((item) => {
+                const configuredLocations = item.locationSettings?.filter((setting) => setting.minStock != null).length ?? 0
+                const costLabel = item.costPrice != null
+                  ? item.packSize && item.packUnit
+                    ? `${formatRp(Math.round(item.costPrice * item.packSize))}/${item.packUnit}`
+                    : `${formatRp(item.costPrice)}/${item.unit}`
+                  : null
+
+                return (
+                  <article key={item.id} className="p-4 sm:p-5">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <h2 className="break-words text-sm font-semibold text-slate-900">{item.name}</h2>
+                          <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                            item.isActive ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-500"
+                          }`}>
+                            {item.isActive ? "Aktif" : "Nonaktif"}
+                          </span>
+                        </div>
+                        <div className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-slate-400">
+                          <span>{item.unit}</span>
+                          {item.packSize && item.packUnit && (
+                            <span className="rounded-md bg-blue-50 px-1.5 py-0.5 text-[10px] text-blue-600">
+                              1 {item.packUnit} = {formatInventoryQuantity(item.packSize)} {item.unit}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      <div className="flex shrink-0 items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={() => openEdit(item)}
+                          disabled={!canEdit}
+                          title={canEdit ? undefined : ALASAN_TERKUNCI}
+                          aria-label={`Edit ${item.name}`}
+                          className={`flex h-9 w-9 items-center justify-center rounded-lg text-slate-400 transition-colors ${AKSI_NONAKTIF} hover:bg-blue-50 hover:text-blue-600`}
+                        >
+                          <Edit className="h-4 w-4" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => openDelete(item.id, item.name)}
+                          disabled={!canEdit}
+                          title={canEdit ? undefined : ALASAN_TERKUNCI}
+                          aria-label={`Hapus ${item.name}`}
+                          className={`flex h-9 w-9 items-center justify-center rounded-lg text-slate-400 transition-colors ${AKSI_NONAKTIF} hover:bg-red-50 hover:text-red-500`}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      </div>
+                    </div>
+
+                    <dl className="mt-4 grid grid-cols-2 gap-x-4 gap-y-3 rounded-xl bg-slate-50 p-3 sm:grid-cols-4">
+                      <div className="min-w-0">
+                        <dt className="text-[10px] font-medium uppercase tracking-wide text-slate-400">SKU</dt>
+                        <dd className="mt-1 truncate font-mono text-xs text-slate-700">{item.sku ?? "—"}</dd>
+                      </div>
+                      <div className="min-w-0">
+                        <dt className="text-[10px] font-medium uppercase tracking-wide text-slate-400">Kategori</dt>
+                        <dd className="mt-1 truncate text-xs font-medium text-slate-700">{item.category ?? "—"}</dd>
+                      </div>
+                      <div className="min-w-0">
+                        <dt className="text-[10px] font-medium uppercase tracking-wide text-slate-400">Harga Pokok</dt>
+                        <dd className={`mt-1 break-words text-xs font-medium ${costLabel ? "text-slate-700" : item.isTrackable ? "text-orange-600" : "text-slate-400"}`}>
+                          {costLabel ?? (item.isTrackable ? "Belum diisi" : "—")}
+                        </dd>
+                      </div>
+                      <div className="min-w-0">
+                        <dt className="text-[10px] font-medium uppercase tracking-wide text-slate-400">Minimum Stok</dt>
+                        <dd className={`mt-1 text-xs font-medium ${configuredLocations > 0 ? "text-blue-600" : "text-slate-400"}`}>
+                          {configuredLocations > 0 ? `${configuredLocations} lokasi diatur` : "Belum diatur"}
+                        </dd>
+                      </div>
+                    </dl>
+                    <div className="mt-3 flex items-center gap-2 text-xs text-slate-500">
+                      {item.isTrackable ? (
+                        <><CheckCircle className="h-4 w-4 text-emerald-500" /> Dilacak per transaksi</>
+                      ) : (
+                        <><span className="h-4 w-4 text-center text-slate-300">—</span> Hanya dihitung via opname (bumbu/garnish)</>
+                      )}
+                    </div>
+                  </article>
+                )
+              })}
+            </div>
+            {items.length === 0 && (
+              <div className="px-4 py-14 text-center sm:py-20">
                 <div className="w-14 h-14 bg-slate-100 rounded-2xl flex items-center justify-center mx-auto mb-4">
                   <Package className="w-7 h-7 text-slate-400" />
                 </div>
-                <div className="text-slate-600 font-semibold">Tidak ada item ditemukan</div>
-                <div className="text-slate-400 text-sm mt-1.5">Coba ubah filter atau kata pencarian</div>
+                <div className="text-slate-600 font-semibold">
+                  {totalAll === 0 ? "Belum ada item" : "Tidak ada item ditemukan"}
+                </div>
+                <div className="text-slate-400 text-sm mt-1.5">
+                  {totalAll > 0
+                    ? "Coba ubah filter atau kata pencarian"
+                    : canEdit
+                      ? "Klik Tambah Item untuk mulai mendaftarkan bahan"
+                      : "Belum ada item yang didaftarkan"}
+                </div>
               </div>
             )}
+            <Pagination page={page} pages={pages} total={total} perPage={30} label="item"
+              loading={loading} scrollToRef={listRef} onPageChange={fetchItems} />
           </>
         )}
       </div>
 
-      {confirmDelete && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
-          <div className="absolute inset-0 bg-black/40" onClick={() => !deleting && setConfirmDelete(null)} />
-          <div className="relative bg-white rounded-2xl border border-slate-200 shadow-xl w-full max-w-sm mx-4 p-6 z-10">
-            <div className="flex items-center gap-4 mb-4">
-              <div className="w-10 h-10 bg-red-100 rounded-xl flex items-center justify-center shrink-0">
-                <Trash2 className="w-5 h-5 text-red-500" />
-              </div>
-              <div>
-                <div className="font-semibold text-slate-900">Hapus Item</div>
-                <div className="text-sm text-slate-500 mt-0.5">Tindakan ini tidak dapat dibatalkan</div>
-              </div>
-            </div>
-            <p className="text-sm text-slate-600 mb-4">
-              Yakin ingin menghapus <span className="font-semibold text-slate-900">&quot;{confirmDelete.name}&quot;</span>? Semua data stok dan riwayat item ini juga akan terhapus.
-            </p>
-            {deleteError && (
-              <div className="mb-4 text-sm text-red-600 bg-red-50 border border-red-200 px-4 py-3 rounded-xl flex items-start gap-2">
-                <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
-                {deleteError}
-              </div>
-            )}
-            <div className="flex gap-3">
-              <button
-                onClick={() => setConfirmDelete(null)}
-                disabled={deleting}
-                className="flex-1 border border-slate-200 hover:bg-slate-50 text-slate-700 font-medium py-2.5 rounded-xl transition-colors disabled:opacity-50"
-              >
-                Batal
-              </button>
-              <button
-                onClick={handleDelete}
-                disabled={deleting}
-                className="flex-1 bg-red-500 hover:bg-red-600 disabled:opacity-60 text-white font-semibold py-2.5 rounded-xl transition-colors flex items-center justify-center gap-2"
-              >
-                {deleting ? <><Loader2 className="w-4 h-4 animate-spin" /> Menghapus...</> : "Hapus"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <ConfirmModal
+        open={confirmDelete !== null}
+        onCancel={() => setConfirmDelete(null)}
+        onConfirm={handleDelete}
+        title="Hapus item?"
+        message={confirmDelete ? `\"${confirmDelete.name}\" beserta stok dan riwayatnya akan terhapus. Tindakan ini tidak dapat dibatalkan.` : undefined}
+        confirmLabel="Hapus"
+        danger
+        loading={deleting}
+        error={deleteError}
+      />
 
       {showModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
-          <div className="absolute inset-0 bg-black/40" onClick={() => setShowModal(false)} />
-          <div className="relative bg-white rounded-2xl border border-slate-200 shadow-xl w-full max-w-2xl mx-4 p-6 z-10 max-h-[90vh] overflow-y-auto">
-            <div className="flex items-center justify-between mb-4">
+        <div className="app-overlay z-50 flex items-end justify-center p-0 sm:items-center sm:p-4">
+          <div className="absolute inset-0 bg-slate-950/55 backdrop-blur-[3px]" onClick={() => setShowModal(false)} />
+          <div className="relative z-10 flex max-h-[calc(100%-1.5rem)] w-full max-w-3xl flex-col overflow-hidden rounded-t-3xl border border-slate-200 bg-white shadow-xl sm:max-h-[calc(100%-2rem)] sm:rounded-2xl">
+            <div className="flex shrink-0 items-center justify-between border-b border-slate-100 bg-white px-4 py-3 sm:px-6 sm:py-4">
               <h2 className="text-lg font-bold text-slate-900">
                 {editItem ? "Edit Item" : "Tambah Item Baru"}
               </h2>
-              <button onClick={() => setShowModal(false)} className="p-1.5 hover:bg-slate-100 rounded-lg">
-                <X className="w-4 h-4 text-slate-500" />
+              <button type="button" onClick={() => setShowModal(false)} aria-label="Tutup formulir" className="flex h-9 w-9 items-center justify-center rounded-full bg-slate-100 text-slate-500 hover:bg-red-50 hover:text-red-600">
+                <X className="h-4 w-4" />
               </button>
             </div>
 
-            {error && (
-              <div className="mb-4 text-sm text-red-600 bg-red-50 border border-red-200 px-4 py-3 rounded-xl">
-                {error}
-              </div>
-            )}
-
-            <form onSubmit={handleSubmit} className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1.5">Nama Item *</label>
-                <input
+            <form onSubmit={handleSubmit} className="flex min-h-0 flex-1 flex-col">
+              <div
+                className="min-h-0 flex-1 space-y-5 overflow-y-auto p-4 sm:p-6"
+                style={{ overflowAnchor: "none" }}
+              >
+              <FormAlert message={error} onClose={() => setError("")} />
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                <div className="md:col-span-2">
+                <label className="mb-2 block text-sm font-medium text-slate-700">
+                  Nama Item <span className="text-red-500" aria-hidden="true">*</span>
+                </label>
+                <StableDraftInput
                   type="text"
                   required
                   placeholder="Contoh: Beef Patty 80gr"
                   value={form.name}
-                  onChange={(e) => setForm({ ...form, name: e.target.value })}
-                  className="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  onCommit={(value) => setForm((previous) => ({ ...previous, name: value }))}
+                  className="h-11 w-full rounded-xl border border-slate-200 px-4 text-sm focus:border-blue-400 focus:outline-none focus:ring-4 focus:ring-blue-50"
                 />
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                </div>
                 <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1.5">SKU</label>
-                  <input
+                  <label className="mb-2 block text-sm font-medium text-slate-700">SKU</label>
+                  <StableDraftInput
                     type="text"
                     placeholder="BP-001"
                     value={form.sku}
-                    onChange={(e) => setForm({ ...form, sku: e.target.value })}
-                    className="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    onCommit={(value) => setForm((previous) => ({ ...previous, sku: value }))}
+                    className="h-11 w-full rounded-xl border border-slate-200 px-4 text-sm focus:border-blue-400 focus:outline-none focus:ring-4 focus:ring-blue-50"
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1.5">Satuan Dasar *</label>
+                  <label className="mb-2 block text-sm font-medium text-slate-700">
+                    Satuan Dasar <span className="text-red-500" aria-hidden="true">*</span>
+                  </label>
                   <div ref={unitRef} className="relative">
                     <button
                       type="button"
                       onClick={() => { setUnitOpen((o) => !o); setUnitSearch("") }}
-                      className="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-sm text-left bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 flex items-center justify-between"
+                      className="flex h-11 w-full items-center justify-between rounded-xl border border-slate-200 bg-white px-4 text-left text-sm focus:border-blue-400 focus:outline-none focus:ring-4 focus:ring-blue-50"
                     >
                       <span className={form.unit ? "text-slate-900" : "text-slate-400"}>{form.unit || "Pilih satuan..."}</span>
                       <svg className="w-4 h-4 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
@@ -594,7 +811,6 @@ export default function InventoryPage() {
                         <div className="p-2 border-b border-slate-100">
                           <input
                             ref={unitSearchRef}
-                            autoFocus
                             type="text"
                             placeholder="Cari atau ketik satuan baru..."
                             value={unitSearch}
@@ -613,7 +829,7 @@ export default function InventoryPage() {
                                 <button
                                   type="button"
                                   onClick={() => {
-                                    if (!trimmed) { unitSearchRef.current?.focus(); return }
+                                    if (!trimmed) { unitSearchRef.current?.focus({ preventScroll: true }); return }
                                     if (alreadyExists) return
                                     setCustomUnits((prev) => [...prev, trimmed])
                                     setForm({ ...form, unit: trimmed })
@@ -651,19 +867,76 @@ export default function InventoryPage() {
                   </div>
                 </div>
               </div>
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1.5">
-                  Kemasan <span className="text-slate-400 font-normal">(opsional)</span>
-                </label>
-                <div className="flex gap-2 items-center">
-                  <span className="text-sm text-slate-500 shrink-0">1</span>
-                  <div ref={packUnitRef} className="relative flex-1">
+              <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div className="flex min-w-0 items-start gap-3">
+                    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-white text-blue-600 ring-1 ring-slate-200">
+                      <Package className="h-4 w-4" />
+                    </div>
+                    <div>
+                      <h3 className="text-sm font-semibold text-slate-800">Kemasan <span className="font-normal text-slate-400">(opsional)</span></h3>
+                      <p className="mt-0.5 text-xs leading-5 text-slate-500">Gunakan jika item dibeli atau disimpan per dus, pack, atau kemasan lain.</p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPackUnitOpen(false)
+                      setError("")
+                      if (showPackaging) {
+                        const snapshot = packagingRestoreRef.current
+                        if (snapshot) {
+                          setLocationMinStocks(snapshot.locationMinStocks)
+                          setAllLocationsMinStock(snapshot.allLocationsMinStock)
+                          setForm((previous) => ({ ...previous, packUnit: "", packSize: "", costPrice: snapshot.costPrice }))
+                          packagingRestoreRef.current = null
+                          setPackagingChangeNotice("")
+                        } else {
+                          const multiplier = parseInventoryDecimal(form.packSize)
+                          if (multiplier != null && multiplier > 0) {
+                            try {
+                              const converted = Object.fromEntries(Object.entries(locationMinStocks).map(([id, value]) => [id, value ? formatInventoryQuantity(stockInputToBase(value, form.packSize) ?? 0) : ""]))
+                              const convertedAll = allLocationsMinStock ? formatInventoryQuantity(stockInputToBase(allLocationsMinStock, form.packSize) ?? 0) : ""
+                              setLocationMinStocks(converted)
+                              setAllLocationsMinStock(convertedAll)
+                            } catch (error) {
+                              setError(error instanceof Error ? error.message : "Minimum stok tidak valid")
+                              return
+                            }
+                          }
+                          setForm((previous) => ({ ...previous, packUnit: "", packSize: "", costPrice: hasCompletePackaging ? "" : previous.costPrice }))
+                          setPackagingChangeNotice(hasCompletePackaging ? "Kemasan dihapus. Isi ulang harga pokok per satuan dasar." : "")
+                        }
+                        setShowPackaging(false)
+                      } else {
+                        packagingRestoreRef.current = { costPrice: form.costPrice, locationMinStocks, allLocationsMinStock }
+                        const hadThresholds = allLocationsMinStock !== "" || Object.values(locationMinStocks).some(Boolean)
+                        const clearedFields = [form.costPrice && "harga pokok", hadThresholds && "minimum stok"].filter(Boolean).join(" dan ")
+                        setPackagingChangeNotice(clearedFields ? `Satuan berubah: ${clearedFields} dikosongkan. Isi ulang sesuai kemasan.` : "")
+                        setForm((previous) => ({ ...previous, costPrice: "" }))
+                        setLocationMinStocks({})
+                        setAllLocationsMinStock("")
+                        setShowPackaging(true)
+                      }
+                    }}
+                    className={`shrink-0 rounded-lg px-3 py-2 text-xs font-semibold transition-colors ${showPackaging ? "text-slate-500 hover:bg-white hover:text-red-600" : "bg-white text-blue-600 ring-1 ring-blue-200 hover:bg-blue-50"}`}
+                  >
+                    {showPackaging ? "Hapus kemasan" : "+ Tambah kemasan"}
+                  </button>
+                </div>
+                {packagingChangeNotice && <p role="status" className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-700">{packagingChangeNotice}</p>}
+                {showPackaging && (
+                  <div className="mt-4 grid gap-4 border-t border-slate-200 pt-4 sm:grid-cols-2">
+                    <div className="min-w-0">
+                      <label className="mb-1.5 block text-xs font-semibold text-slate-600">Jenis kemasan <span className="text-red-500">*</span></label>
+                      <div ref={packUnitRef} className="relative min-w-0">
                     <button
                       type="button"
+                      aria-expanded={packUnitOpen}
                       onClick={() => { setPackUnitOpen((o) => !o); setPackUnitSearch("") }}
-                      className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm text-left bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 flex items-center justify-between"
+                      className="flex h-11 w-full items-center justify-between rounded-xl border border-slate-200 bg-white px-3 text-left text-sm focus:border-blue-400 focus:outline-none focus:ring-4 focus:ring-blue-50"
                     >
-                      <span className={form.packUnit ? "text-slate-900" : "text-slate-400"}>{form.packUnit || "Pilih kemasan..."}</span>
+                      <span className={form.packUnit ? "text-slate-900" : "text-slate-400"}>{form.packUnit || "Contoh: dus"}</span>
                       <svg className="w-4 h-4 text-slate-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
                     </button>
                     {packUnitOpen && (
@@ -671,7 +944,6 @@ export default function InventoryPage() {
                         <div className="p-2 border-b border-slate-100">
                           <input
                             ref={packUnitSearchRef}
-                            autoFocus
                             type="text"
                             placeholder="Cari atau ketik kemasan baru..."
                             value={packUnitSearch}
@@ -690,7 +962,7 @@ export default function InventoryPage() {
                                 <button
                                   type="button"
                                   onClick={() => {
-                                    if (!trimmed) { packUnitSearchRef.current?.focus(); return }
+                                    if (!trimmed) { packUnitSearchRef.current?.focus({ preventScroll: true }); return }
                                     if (alreadyExists) return
                                     setCustomPackUnits((prev) => [...prev, trimmed])
                                     setForm({ ...form, packUnit: trimmed })
@@ -725,31 +997,41 @@ export default function InventoryPage() {
                         </div>
                       </div>
                     )}
+                      </div>
+                    </div>
+                    <div>
+                      <label htmlFor="inventory-pack-size" className="mb-1.5 block text-xs font-semibold text-slate-600">Isi per kemasan <span className="text-red-500">*</span></label>
+                      <div className="relative">
+                        <StableDraftInput
+                          id="inventory-pack-size"
+                          ref={packSizeRef}
+                          type="text"
+                          inputMode="decimal"
+                          placeholder="Contoh: 0,05 atau 12"
+                          value={form.packSize}
+                          onCommit={(value) => setForm((previous) => ({ ...previous, packSize: value }))}
+                          className="h-11 w-full appearance-none rounded-xl border border-slate-200 bg-white pl-3 pr-16 text-sm tabular-nums focus:border-blue-400 focus:outline-none focus:ring-4 focus:ring-blue-50 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+                        />
+                        <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs text-slate-500">{form.unit}</span>
+                      </div>
+                      <p className="mt-1.5 text-xs leading-5 text-slate-500">Boleh pecahan, maksimal 3 angka desimal{form.unit === "kg" ? ". Contoh: 0,05 kg = 50 gram." : ". Gunakan koma untuk desimal."}</p>
+                    </div>
+                    {hasCompletePackaging && (
+                      <p className="rounded-xl bg-blue-50 px-3 py-2.5 text-xs font-medium text-blue-700 sm:col-span-2">
+                        1 {form.packUnit} = {formatInventoryQuantity(parsedPackSize!)} {form.unit}{form.unit === "kg" ? ` (${formatInventoryQuantity(parsedPackSize! * 1000)} gram)` : ""}
+                      </p>
+                    )}
                   </div>
-                  <span className="text-sm text-slate-500 shrink-0">=</span>
-                  <input
-                    type="number"
-                    min="1"
-                    placeholder="Isi"
-                    value={form.packSize}
-                    onChange={(e) => setForm({ ...form, packSize: e.target.value })}
-                    className="w-20 px-3 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 text-center"
-                  />
-                  <span className="text-sm text-slate-500 shrink-0">{form.unit}</span>
-                </div>
-                {form.packSize && form.packUnit && (
-                  <p className="text-xs text-blue-600 mt-1.5">
-                    1 {form.packUnit} = {form.packSize} {form.unit}
-                  </p>
                 )}
               </div>
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1.5">Kategori</label>
-                <div ref={categoryRef} className="relative">
+              <div className="grid grid-cols-1 items-start gap-4 md:grid-cols-2">
+                <div>
+                  <label className="mb-2 block text-sm font-medium text-slate-700">Kategori</label>
+                  <div ref={categoryRef} className="relative">
                   <button
                     type="button"
                     onClick={() => { setCategoryOpen((o) => !o); setCategorySearch("") }}
-                    className="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-sm text-left bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 flex items-center justify-between"
+                    className="flex h-11 w-full items-center justify-between rounded-xl border border-slate-200 bg-white px-4 text-left text-sm focus:border-blue-400 focus:outline-none focus:ring-4 focus:ring-blue-50"
                   >
                     <span className={form.category ? "text-slate-900" : "text-slate-400"}>{form.category || "Pilih atau buat kategori..."}</span>
                     <svg className="w-4 h-4 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
@@ -759,7 +1041,6 @@ export default function InventoryPage() {
                       <div className="p-2 border-b border-slate-100">
                         <input
                           ref={categorySearchRef}
-                          autoFocus
                           type="text"
                           placeholder="Cari atau ketik kategori baru..."
                           value={categorySearch}
@@ -778,7 +1059,7 @@ export default function InventoryPage() {
                               <button
                                 type="button"
                                 onClick={() => {
-                                  if (!trimmed) { categorySearchRef.current?.focus(); return }
+                                  if (!trimmed) { categorySearchRef.current?.focus({ preventScroll: true }); return }
                                   if (alreadyExists) return
                                   setForm({ ...form, category: trimmed })
                                   setCategoryOpen(false)
@@ -812,75 +1093,81 @@ export default function InventoryPage() {
                       </div>
                     </div>
                   )}
+                  </div>
                 </div>
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1.5">
-                    Harga Pokok per {form.packUnit || form.unit}
+                  <label className="mb-2 block text-sm font-medium text-slate-700">
+                    Harga Pokok per {inputUnit} <span className="text-red-500" aria-hidden="true">*</span>
                   </label>
                   <div className="relative">
                     <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-slate-400">Rp</span>
-                    <input
-                      type="text"
-                      inputMode="numeric"
-                      placeholder="0"
+                    <CostPriceInput
+                      inputRef={priceRef}
+                      ariaLabel={`Harga Pokok per ${inputUnit}`}
                       value={form.costPrice}
-                      onChange={(e) => setForm({ ...form, costPrice: formatRpInput(e.target.value) })}
-                      className="w-full pl-9 pr-4 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      onCommit={(value) => setForm((previous) => ({ ...previous, costPrice: value }))}
                     />
                   </div>
-                  {form.packSize && form.packUnit && form.costPrice && Number(form.packSize) > 0 && (
-                    <p className="text-xs text-blue-600 mt-1">
-                      = Rp {Math.round(Number(parseRpInput(form.costPrice)) / Number(form.packSize)).toLocaleString("id-ID")} per {form.unit}
-                    </p>
-                  )}
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1.5">
-                    Stok Minimum Default {form.packUnit ? `(dalam ${form.packUnit})` : `(dalam ${form.unit})`}
-                  </label>
-                  <input
-                    type="number"
-                    min="0"
-                    placeholder="0"
-                    value={form.minStock}
-                    onChange={(e) => setForm({ ...form, minStock: e.target.value })}
-                    className="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
-                  {form.packSize && form.packUnit && form.minStock && Number(form.minStock) > 0 && (
-                    <p className="text-xs text-blue-600 mt-1">
-                      = {Number(form.minStock) * Number(form.packSize)} {form.unit}
-                    </p>
-                  )}
+                  <p className="mt-1.5 text-xs leading-5 text-slate-500">
+                    {hasCompletePackaging
+                      ? `Isi harga beli untuk 1 ${form.packUnit}. HPP per ${form.unit} dihitung otomatis; Rp0 boleh untuk bahan gratis.`
+                      : `Isi harga beli untuk 1 ${inputUnit}. Gunakan Rp0 jika bahan memang diperoleh gratis.`}
+                  </p>
                 </div>
               </div>
               {locations.length > 0 && (
-                <div className="border border-slate-200 rounded-xl p-3 space-y-3">
-                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1">
-                    <div>
-                      <div className="text-sm font-medium text-slate-700">Edit Minimum Lokasi</div>
-                      <div className="text-xs text-slate-400">Sesuaikan minimum stok di berbagai lokasi.</div>
+                <div className="space-y-3 rounded-2xl border border-slate-200 p-3 sm:p-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0 flex-1">
+                      <div className="text-sm font-semibold text-slate-800">Minimum Stok per Lokasi</div>
+                      <div className="mt-0.5 text-xs leading-relaxed text-slate-400">Peringatan dibuat saat stok sama dengan atau di bawah minimum. Untuk outlet, WhatsApp dikirim ke penanggung jawab gudang pemenuhannya.</div>
                     </div>
-                    <div className="text-xs text-slate-400">
-                      Dalam {form.packUnit || form.unit}
+                    <div className="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] leading-5 text-slate-500">
+                      <span>Dalam</span>
+                      <span className="font-semibold text-slate-700">{inputUnit}</span>
                     </div>
                   </div>
-                  <div className="space-y-2 max-h-44 overflow-y-auto pr-1">
+                  <div className="grid grid-cols-1 gap-3 rounded-xl border border-blue-100 bg-blue-50 p-3 sm:grid-cols-[minmax(0,1fr)_10rem] sm:items-center">
+                    <div className="min-w-0">
+                      <div className="text-sm font-semibold text-blue-800">Semua lokasi</div>
+                      <div className="mt-0.5 text-[11px] leading-relaxed text-blue-600">Isi sekali untuk menerapkan nilai yang sama ke seluruh lokasi.</div>
+                    </div>
+                    <div className="relative">
+                      <MinimumStockInput
+                        value={allLocationsMinStock}
+                        placeholder="Atur semua..."
+                        ariaLabel="Minimum stok semua lokasi"
+                        tone="blue"
+                        onCommit={(value) => {
+                          setAllLocationsMinStock(value)
+                          setLocationMinStocks(Object.fromEntries(
+                            locations.map((location) => [location.id, value])
+                          ))
+                        }}
+                      />
+                      <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-slate-400 pointer-events-none">
+                        {inputUnit}
+                      </span>
+                    </div>
+                  </div>
+                  {/* Di HP daftar ini mengalir mengikuti scroll form. Dulu ia punya
+                      area scroll sendiri, dan kolom di dalamnya membuat Safari
+                      menggulirkan dua scroller sekaligus sehingga tampilan terlihat
+                      bergerak saat mengetik. Di layar besar tetap dibatasi. */}
+                  <div className="space-y-2 pr-1 sm:max-h-52 sm:overflow-y-auto">
                     {locations.map((location) => {
                       const overrideValue = locationMinStocks[location.id] ?? ""
-                      const defaultValue = form.minStock || "0"
                       return (
                         <div
                           key={location.id}
-                          className="grid grid-cols-1 sm:grid-cols-[1fr_10rem] gap-2 sm:items-center rounded-xl bg-slate-50 px-3 py-2"
+                          className="grid grid-cols-1 gap-2 rounded-xl bg-slate-50 p-3 sm:grid-cols-[minmax(0,1fr)_10rem] sm:items-center"
                         >
                           <div className="min-w-0">
                             <div className="flex items-center gap-2">
                               <span className="text-sm font-medium text-slate-700 truncate">{location.name}</span>
-                              <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${
+                              <span className={`shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-medium ${
                                 location.type === "WAREHOUSE"
-                                  ? "bg-blue-100 text-blue-700"
+                                  ? "bg-amber-100 text-amber-700"
                                   : "bg-blue-100 text-blue-700"
                               }`}>
                                 {location.type === "WAREHOUSE" ? "Gudang" : "Outlet"}
@@ -888,71 +1175,78 @@ export default function InventoryPage() {
                             </div>
                           </div>
                           <div className="relative">
-                            <input
-                              type="number"
-                              min="0"
-                              placeholder={defaultValue}
+                            <MinimumStockInput
                               value={overrideValue}
-                              onChange={(e) => setLocationMinStocks((prev) => ({
-                                ...prev,
-                                [location.id]: e.target.value,
-                              }))}
-                              className="w-full pl-3 pr-16 py-2 rounded-lg border border-slate-200 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                              placeholder="Atur sendiri..."
+                              ariaLabel={`Minimum stok ${location.name}`}
+                              onCommit={(value) => {
+                                setAllLocationsMinStock("")
+                                setLocationMinStocks((prev) => ({
+                                  ...prev,
+                                  [location.id]: value,
+                                }))
+                              }}
                             />
                             <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-slate-400 pointer-events-none">
-                              {form.packUnit || form.unit}
+                              {inputUnit}
                             </span>
                           </div>
                         </div>
                       )
                     })}
                   </div>
-                  {form.packSize && form.packUnit && Object.values(locationMinStocks).some(Boolean) && (
-                    <div className="text-xs text-blue-600">
-                      Nilai lokasi juga dikonversi ke satuan dasar saat disimpan: 1 {form.packUnit} = {form.packSize} {form.unit}.
+                  {/* Tampil begitu kemasan lengkap, tidak menunggu nilai terisi.
+                      Sebelumnya teks ini muncul saat kolom mulai diketik, sehingga
+                      tinggi form bertambah dan isinya tergeser di tengah pengetikan. */}
+                  {hasCompletePackaging && (
+                    <div className="text-xs leading-relaxed text-blue-600">
+                      Nilai lokasi juga dikonversi ke satuan dasar saat disimpan: 1 {form.packUnit} = {formatInventoryQuantity(parsedPackSize!)} {form.unit}.
                     </div>
                   )}
                 </div>
               )}
-              <div
-                className="flex items-center justify-between p-3 bg-slate-50 rounded-xl cursor-pointer"
+              <button
+                type="button"
+                aria-pressed={form.isTrackable}
+                className="flex w-full items-center justify-between gap-4 rounded-xl bg-slate-50 p-3 text-left transition-colors hover:bg-slate-100"
                 onClick={() => setForm({ ...form, isTrackable: !form.isTrackable })}
               >
-                <div>
-                  <div className="text-sm font-medium text-slate-700">Dilacak di opname</div>
-                  <div className="text-xs text-slate-400">Nonaktifkan untuk bumbu atau garnish</div>
+                <div className="min-w-0">
+                  <div className="text-sm font-medium text-slate-700">Dilacak per transaksi</div>
+                  <div className="mt-0.5 text-xs leading-relaxed text-slate-400">Matikan untuk bumbu atau garnish yang kecil. Stoknya tidak berkurang tiap penjualan, cukup dihitung saat opname. Tetap bisa barang masuk dan transfer.</div>
                 </div>
-                <div className={`w-10 h-6 rounded-full relative transition-colors ${form.isTrackable ? "bg-blue-600" : "bg-slate-300"}`}>
+                <div className={`relative h-6 w-10 shrink-0 rounded-full transition-colors ${form.isTrackable ? "bg-blue-600" : "bg-slate-300"}`}>
                   <div className={`absolute top-1 w-4 h-4 bg-white rounded-full shadow transition-all ${form.isTrackable ? "right-1" : "left-1"}`} />
                 </div>
-              </div>
-              {editItem && (
-                <div
-                  className="flex items-center justify-between p-3 bg-slate-50 rounded-xl cursor-pointer"
-                  onClick={() => setForm({ ...form, isActive: !form.isActive })}
-                >
-                  <div>
-                    <div className="text-sm font-medium text-slate-700">Status item</div>
-                    <div className="text-xs text-slate-400">{form.isActive ? "Aktif — muncul di daftar pilihan" : "Nonaktif — tersembunyi dari form"}</div>
-                  </div>
-                  <div className={`w-10 h-6 rounded-full relative transition-colors ${form.isActive ? "bg-blue-600" : "bg-slate-300"}`}>
-                    <div className={`absolute top-1 w-4 h-4 bg-white rounded-full shadow transition-all ${form.isActive ? "right-1" : "left-1"}`} />
-                  </div>
+              </button>
+              <button
+                type="button"
+                aria-pressed={form.isActive}
+                className="flex w-full items-center justify-between gap-4 rounded-xl bg-slate-50 p-3 text-left transition-colors hover:bg-slate-100"
+                onClick={() => setForm({ ...form, isActive: !form.isActive })}
+              >
+                <div className="min-w-0">
+                  <div className="text-sm font-medium text-slate-700">Status item</div>
+                  <div className="mt-0.5 text-xs leading-relaxed text-slate-400">{form.isActive ? "Aktif — muncul di daftar pilihan" : "Nonaktif — tersembunyi dari form"}</div>
                 </div>
-              )}
+                <div className={`relative h-6 w-10 shrink-0 rounded-full transition-colors ${form.isActive ? "bg-blue-600" : "bg-slate-300"}`}>
+                  <div className={`absolute top-1 w-4 h-4 bg-white rounded-full shadow transition-all ${form.isActive ? "right-1" : "left-1"}`} />
+                </div>
+              </button>
+              </div>
 
-              <div className="flex gap-3 pt-2">
+              <div className="dialog-actions grid shrink-0 grid-cols-2 gap-3 border-t border-slate-100 bg-white px-4 py-3 sm:px-6 sm:py-4">
                 <button
                   type="button"
                   onClick={() => setShowModal(false)}
-                  className="flex-1 border border-slate-200 hover:bg-slate-50 text-slate-700 font-medium py-3 rounded-xl transition-colors"
+                  className="min-h-12 rounded-full border border-slate-200 px-4 py-3 font-medium text-slate-700 transition-colors hover:bg-slate-50"
                 >
                   Batal
                 </button>
                 <button
                   type="submit"
                   disabled={submitting}
-                  className="flex-1 bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white font-semibold py-3 rounded-full transition-colors flex items-center justify-center gap-2"
+                  className="flex min-h-12 items-center justify-center gap-2 rounded-full bg-blue-600 px-4 py-3 font-semibold text-white transition-colors hover:bg-blue-700 disabled:opacity-60"
                 >
                   {submitting ? <><Loader2 className="w-4 h-4 animate-spin" /> Menyimpan...</> : "Simpan"}
                 </button>

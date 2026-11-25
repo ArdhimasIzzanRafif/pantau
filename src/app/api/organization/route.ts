@@ -8,17 +8,16 @@ export async function GET() {
   const [org, dbUser] = await Promise.all([
     prisma.organization.findUnique({
       where: { id: user.organizationId },
-      select: { id: true, name: true, qrisImageUrl: true, qrisPayload: true, midtransServerKey: true, midtransClientKey: true, midtransProduction: true, receiptLogoUrl: true, receiptWifiName: true, receiptWifiPassword: true, receiptFooterText: true },
+      select: { id: true, name: true, plan: true, qrisImageUrl: true, qrisPayload: true, receiptLogoUrl: true, receiptWifiName: true, receiptWifiPassword: true, receiptFooterText: true },
     }),
-    prisma.user.findUnique({ where: { id: user.id }, select: { name: true } }),
+    prisma.user.findUnique({ where: { id: user.id }, select: { name: true, image: true } }),
   ])
   if (!org) return err("Organisasi tidak ditemukan", 404)
   return ok({
     ...org,
     businessName: org.name,
     userName: dbUser?.name ?? null,
-    midtransServerKey: undefined,
-    hasMidtrans: !!org.midtransServerKey,
+    userImage: dbUser?.image ?? null,
   })
 }
 
@@ -34,6 +33,8 @@ export async function PATCH(req: Request) {
       return err(`Body parse gagal: ${e instanceof Error ? e.message : String(e)}`, 400)
     }
 
+    let updatedUserImage: string | null | undefined
+
     // Any authenticated user can update their own display name
     // Mobile sends `name`, web sends `userName`
     const newUserName = typeof body.userName === "string" ? body.userName : typeof body.name === "string" ? body.name : undefined
@@ -41,28 +42,41 @@ export async function PATCH(req: Request) {
       await prisma.user.update({ where: { id: user.id }, data: { name: newUserName.trim() } })
     }
 
+    // Foto profil sendiri — semua user boleh ubah punya sendiri
+    if ("image" in body) {
+      if (body.image !== null && body.image !== "") {
+        if (typeof body.image !== "string" || !/^\/api\/uploads\/profile\/[a-zA-Z0-9._-]+$/.test(body.image)) {
+          return err("URL foto profil tidak valid")
+        }
+        updatedUserImage = body.image
+      } else {
+        updatedUserImage = null
+      }
+      await prisma.user.update({ where: { id: user.id }, data: { image: updatedUserImage } })
+    }
+
     // Everything below is OWNER-only
-    if (user.role !== "OWNER") return ok({ ok: true })
+    if (user.role !== "OWNER") return ok({ ok: true, userImage: updatedUserImage })
 
     const orgData: Record<string, unknown> = {}
 
     // Mobile sends `businessName`, web sends `businessName` too
     if (typeof body.businessName === "string" && body.businessName.trim()) orgData.name = body.businessName.trim()
-    if ("qrisImageUrl" in body) orgData.qrisImageUrl = (body.qrisImageUrl as string | null) ?? null
-    if ("qrisPayload" in body) orgData.qrisPayload = (body.qrisPayload as string | null) ?? null
-    if ("midtransServerKey" in body) orgData.midtransServerKey = (body.midtransServerKey as string | null) || null
-    if ("midtransClientKey" in body) orgData.midtransClientKey = (body.midtransClientKey as string | null) || null
-    if (typeof body.midtransProduction === "boolean") orgData.midtransProduction = body.midtransProduction
     if ("receiptLogoUrl" in body) orgData.receiptLogoUrl = (body.receiptLogoUrl as string | null) ?? null
     if ("receiptWifiName" in body) orgData.receiptWifiName = (body.receiptWifiName as string | null) || null
     if ("receiptWifiPassword" in body) orgData.receiptWifiPassword = (body.receiptWifiPassword as string | null) || null
     if ("receiptFooterText" in body) orgData.receiptFooterText = (body.receiptFooterText as string | null) || null
+    // Ganti paket langganan sendiri — hanya dua paket yang dijual: Kasir (STARTER) & Operasional (PRO)
+    if ("plan" in body) {
+      if (body.plan !== "STARTER" && body.plan !== "PRO") return err("Paket tidak valid")
+      orgData.plan = body.plan
+    }
 
     if (Object.keys(orgData).length > 0) {
       await prisma.organization.update({ where: { id: user.organizationId }, data: orgData })
     }
 
-    return ok({ ok: true })
+    return ok({ ok: true, userImage: updatedUserImage })
   } catch (e) {
     console.error("[PATCH /api/organization]", e)
     return err(`Server error: ${e instanceof Error ? e.message : String(e)}`, 500)

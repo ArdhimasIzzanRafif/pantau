@@ -10,6 +10,14 @@ const String kApiBase = String.fromEnvironment(
   defaultValue: 'http://10.0.2.2:3000',
 );
 
+String resolveApiUrl(String url) {
+  final uri = Uri.tryParse(url);
+  if (uri != null && uri.hasScheme) return url;
+  return Uri.parse('${kApiBase.replaceFirst(RegExp(r'/$'), '')}/')
+      .resolve(url)
+      .toString();
+}
+
 const _storage = FlutterSecureStorage();
 const _sessionKey = 'pantau_session';
 
@@ -46,6 +54,15 @@ class ApiClient {
 
   Future<dynamic> post(String path, {dynamic data}) async {
     final res = await _dio.post(path, data: data);
+    return res.data;
+  }
+
+  Future<dynamic> postMultipart(String path, {required FormData data}) async {
+    final res = await _dio.post(
+      path,
+      data: data,
+      options: Options(contentType: 'multipart/form-data'),
+    );
     return res.data;
   }
 
@@ -102,6 +119,15 @@ class ApiClient {
     if (raw == null) return null;
     try { return jsonDecode(raw) as Map<String, dynamic>; } catch (_) { return null; }
   }
+}
+
+/// Beberapa endpoint daftar sudah dipaginasi dan mengembalikan
+/// `{ items, total, page, pages }`, sebagian lain masih array polos.
+/// Helper ini menerima keduanya.
+List asList(dynamic data) {
+  if (data is List) return data;
+  if (data is Map && data['items'] is List) return data['items'] as List;
+  return const [];
 }
 
 // Dipanggil ketika API return 401 — auth_provider.dart mendaftarkan handler-nya

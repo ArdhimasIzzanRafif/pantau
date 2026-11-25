@@ -1,10 +1,23 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { useParams, useRouter } from "next/navigation"
+import { useParams, useRouter, useSearchParams } from "next/navigation"
+import { InfoCard, InfoRow, InfoNote } from "@/components/ui/info-card"
 import { ArrowLeft, Truck, Package, ImageIcon } from "lucide-react"
 
-type ReceiptItem = { id: string; quantity: number; costPrice: number | null; item: { name: string; unit: string } }
+type ReceiptItem = {
+  id: string
+  quantity: number
+  costPrice: number | null
+  purchaseQuantity: number
+  purchaseUnit: string
+  purchaseUnitCost: number | null
+  lineTotal: number | null
+  packSizeSnapshot: number | null
+  batchNumber: string | null
+  expiryDate: string | null
+  item: { name: string; unit: string }
+}
 type GoodsReceipt = {
   id: string; supplier: string | null; receiptNumber: string | null
   notes: string | null; imageUrl: string | null; createdAt: string
@@ -24,17 +37,19 @@ function fmtDate(s: string) {
 export default function ReceiptDetailPage() {
   const { id } = useParams<{ id: string }>()
   const router  = useRouter()
+  const searchParams = useSearchParams()
+  const historyQuery = searchParams.get("scope") === "history" ? "?history=1" : ""
   const [data, setData]       = useState<GoodsReceipt | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError]     = useState("")
 
   useEffect(() => {
-    fetch(`/api/goods-receipts/${id}`)
+    fetch(`/api/goods-receipts/${id}${historyQuery}`)
       .then((r) => r.ok ? r.json() : Promise.reject())
       .then(setData)
       .catch(() => setError("Data tidak ditemukan"))
       .finally(() => setLoading(false))
-  }, [id])
+  }, [historyQuery, id])
 
   if (loading) return (
     <div className="flex items-center justify-center h-64">
@@ -46,7 +61,10 @@ export default function ReceiptDetailPage() {
   )
 
   const totalQty  = data.items.reduce((s, i) => s + Number(i.quantity), 0)
-  const totalCost = data.items.reduce((s, i) => s + (i.costPrice ? Number(i.costPrice) * Number(i.quantity) : 0), 0)
+  const totalCost = data.items.reduce((sum, item) => {
+    if (item.lineTotal != null) return sum + Number(item.lineTotal)
+    return sum + (item.costPrice ? Number(item.costPrice) * Number(item.quantity) : 0)
+  }, 0)
 
   return (
     <div className="max-w-3xl mx-auto space-y-6">
@@ -64,38 +82,26 @@ export default function ReceiptDetailPage() {
       </div>
 
       {/* Summary */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+      {/* Sebaris di HP seperti halaman rincian lain, bukan bertumpuk ke bawah. */}
+      <div className="grid grid-cols-3 gap-2 sm:gap-3">
         {[
           { label: "Lokasi Tujuan",  value: data.location.name },
           { label: "Total Unit",     value: String(totalQty) },
           { label: "Est. Total Cost",value: totalCost > 0 ? formatRp(totalCost) : "—" },
         ].map((c) => (
-          <div key={c.label} className="bg-white rounded-2xl border border-slate-200 p-4">
-            <div className="text-xs text-slate-400 mb-1">{c.label}</div>
-            <div className="text-sm font-bold text-slate-800 leading-tight">{c.value}</div>
+          <div key={c.label} className="min-w-0 rounded-2xl border border-slate-200 bg-white p-3 sm:p-4">
+            <div className="truncate text-xs text-slate-400 mb-1">{c.label}</div>
+            <div className="truncate text-sm font-bold leading-tight text-slate-800" title={c.value}>{c.value}</div>
           </div>
         ))}
       </div>
 
       {/* Info */}
-      <div className="bg-white rounded-2xl border border-slate-200 p-5">
-        <div className="flex items-center gap-2 text-slate-700 mb-3">
-          <Truck className="w-4 h-4 text-slate-400" />
-          <span className="text-sm font-medium">Info Penerimaan</span>
-        </div>
-        <div className="grid grid-cols-2 gap-y-2 text-sm">
-          <span className="text-slate-400">Supplier</span>
-          <span className="text-slate-800 font-medium">{data.supplier || "—"}</span>
-          {data.receiptNumber && <>
-            <span className="text-slate-400">No. Surat Jalan</span>
-            <span className="text-slate-800">{data.receiptNumber}</span>
-          </>}
-          {data.notes && <>
-            <span className="text-slate-400">Catatan</span>
-            <span className="text-slate-800">{data.notes}</span>
-          </>}
-        </div>
-      </div>
+      <InfoCard icon={<Truck className="w-4 h-4 text-slate-400" />} title="Info Penerimaan">
+        <InfoRow label="Supplier" value={data.supplier || <span className="font-normal text-slate-400">—</span>} />
+        {data.receiptNumber && <InfoRow label="No. Surat Jalan" value={data.receiptNumber} />}
+        {data.notes && <InfoNote label="Catatan">{data.notes}</InfoNote>}
+      </InfoCard>
 
       {/* Foto Struk */}
       {data.imageUrl && (
@@ -106,6 +112,8 @@ export default function ReceiptDetailPage() {
           </div>
           <div className="p-4">
             <a href={data.imageUrl} target="_blank" rel="noopener noreferrer">
+              {/* Bukti penerimaan memakai URL unggahan dinamis yang harus dapat dibuka apa adanya. */}
+              {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
                 src={data.imageUrl}
                 alt="Foto struk"
@@ -123,25 +131,38 @@ export default function ReceiptDetailPage() {
           <Package className="w-4 h-4 text-slate-400" />
           <span className="text-sm font-medium text-slate-700">Item Diterima</span>
         </div>
-        <div className="divide-y divide-slate-100 overflow-x-auto">
-          <div className="px-5 py-2 grid grid-cols-3 text-xs font-medium text-slate-400 min-w-72">
-            <span className="col-span-2">Item</span>
-            <span className="text-right">Jumlah</span>
+        {/* Tanpa geser ke samping: nama item yang panjang dipotong elipsis,
+            sama seperti tabel di rincian opname. */}
+        <div className="divide-y divide-slate-100">
+          <div className="grid grid-cols-3 gap-2 px-4 py-2 text-xs font-medium text-slate-400 sm:px-5">
+            <span className="col-span-2 truncate">Item</span>
+            <span className="truncate text-right">Jumlah</span>
           </div>
           {data.items.map((i) => (
-            <div key={i.id} className="px-5 py-3 grid grid-cols-3 items-center min-w-72">
-              <div className="col-span-2">
-                <div className="text-sm text-slate-800">{i.item.name}</div>
-                {i.costPrice !== null && (
+            <div key={i.id} className="grid grid-cols-3 items-center gap-2 px-4 py-3 sm:px-5">
+              <div className="col-span-2 min-w-0">
+                <div className="truncate text-sm text-slate-800" title={i.item.name}>{i.item.name}</div>
+                {i.purchaseUnitCost !== null && (
                   <div className="text-xs text-slate-400 mt-0.5">
-                    {formatRp(Number(i.costPrice))} / {i.item.unit}
-                    {" · "} Subtotal {formatRp(Number(i.costPrice) * Number(i.quantity))}
+                    {formatRp(Number(i.purchaseUnitCost))} / {i.purchaseUnit}
+                    {" · "} Subtotal {formatRp(Number(i.lineTotal ?? Number(i.purchaseQuantity) * Number(i.purchaseUnitCost)))}
+                  </div>
+                )}
+                {(i.batchNumber || i.expiryDate) && (
+                  <div className="text-xs text-amber-600 mt-1">
+                    {i.batchNumber ? `Lot ${i.batchNumber}` : "Lot otomatis"}
+                    {i.expiryDate ? ` · kedaluwarsa ${new Date(i.expiryDate).toLocaleDateString("id-ID")}` : ""}
                   </div>
                 )}
               </div>
-              <span className="text-right text-sm font-semibold text-slate-800">
-                {i.quantity} {i.item.unit}
-              </span>
+              <div className="text-right">
+                <div className="text-sm font-semibold text-slate-800">
+                  {i.purchaseQuantity} {i.purchaseUnit}
+                </div>
+                {i.purchaseUnit !== i.item.unit && (
+                  <div className="text-xs text-slate-400 mt-0.5">{i.quantity} {i.item.unit} masuk stok</div>
+                )}
+              </div>
             </div>
           ))}
           {totalCost > 0 && (

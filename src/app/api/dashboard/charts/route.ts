@@ -33,7 +33,14 @@ export async function GET(req: NextRequest) {
       where: {
         order: { organizationId: orgId, status: "PAID", paidAt: { gte: startDate } },
       },
-      select: { name: true, qty: true, subtotal: true },
+      select: {
+        menuItemId: true,
+        name: true,
+        qty: true,
+        subtotal: true,
+        // Nama terkini menu, supaya penggantian nama tidak memecah laporan.
+        menuItem: { select: { name: true } },
+      },
     }),
   ])
 
@@ -74,15 +81,24 @@ export async function GET(req: NextRequest) {
     orders: count,
   }))
 
-  // Top products
+  // Top products.
+  // Dikelompokkan per menuItemId, bukan per nama: dua menu bernama sama tidak
+  // lagi tergabung, dan menu yang diganti namanya tetap jadi satu baris.
+  // Baris dari menu yang sudah dihapus (menuItemId jadi null) dikelompokkan
+  // memakai nama yang tersimpan di transaksi.
   const productMap = new Map<string, { name: string; qty: number; revenue: number }>()
   for (const item of orderItems) {
-    const existing = productMap.get(item.name)
+    const key = item.menuItemId ? `id:${item.menuItemId}` : `name:${item.name}`
+    const existing = productMap.get(key)
     if (existing) {
       existing.qty += Number(item.qty)
       existing.revenue += Number(item.subtotal)
     } else {
-      productMap.set(item.name, { name: item.name, qty: Number(item.qty), revenue: Number(item.subtotal) })
+      productMap.set(key, {
+        name: item.menuItem?.name ?? item.name,
+        qty: Number(item.qty),
+        revenue: Number(item.subtotal),
+      })
     }
   }
   const topProducts = [...productMap.values()]

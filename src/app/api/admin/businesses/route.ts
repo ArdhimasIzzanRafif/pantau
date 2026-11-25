@@ -1,6 +1,11 @@
 import { prisma } from "@/lib/db"
 import { requireAdmin } from "@/lib/admin-auth"
 import { isResponse, ok, err } from "@/lib/api-helpers"
+import type { Prisma } from "@prisma/client"
+
+function toAuditJson(value: unknown): Prisma.InputJsonValue {
+  return JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue
+}
 
 export async function GET() {
   const admin = await requireAdmin()
@@ -8,7 +13,6 @@ export async function GET() {
 
   const now = new Date()
   const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1)
-  const thirtyDaysAgo = new Date(Date.now() - 30 * 86400000)
   const sevenDaysAgo = new Date(Date.now() - 7 * 86400000)
 
   const orgs = await prisma.organization.findMany({
@@ -91,7 +95,7 @@ export async function PATCH(req: Request) {
   if (!org) return err("Bisnis tidak ditemukan", 404)
 
   const before: Record<string, unknown> = { plan: org.plan, status: org.status }
-  const data: Record<string, unknown> = {}
+  const data: Prisma.OrganizationUpdateInput = {}
 
   if (action === "change_plan" && plan) {
     data.plan = plan
@@ -116,8 +120,8 @@ export async function PATCH(req: Request) {
       targetType: "organization",
       targetId: id,
       note: note ?? null,
-      before,
-      after: data,
+      before: toAuditJson(before),
+      after: toAuditJson(data),
     },
   })
 

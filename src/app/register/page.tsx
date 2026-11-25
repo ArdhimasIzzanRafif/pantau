@@ -4,17 +4,51 @@ import Link from "next/link"
 import { useState } from "react"
 import { useRouter } from "next/navigation"
 import { signIn } from "next-auth/react"
-import { BarChart3, Eye, EyeOff, Loader2, CheckCircle, Check } from "lucide-react"
+import { Eye, EyeOff, Loader2, CheckCircle, Check, X, Store, UtensilsCrossed } from "lucide-react"
 import { checkPassword, passwordStrength, isPasswordValid } from "@/lib/password"
+import { WarningModal } from "@/components/ui/warning-modal"
+import { PantauLogo } from "@/components/pantau-logo"
+import { RegistrationSelect } from "@/components/ui/registration-select"
 
 const steps = ["Akun Anda", "Info Bisnis", "Selesai"]
+
+const businessTypes = [
+  { label: "Food & Beverage", options: [
+    { value: "restoran", label: "Restoran" },
+    { value: "kafe", label: "Kafe / Coffee Shop" },
+    { value: "fastfood", label: "Fast Food / Burger / Ayam" },
+    { value: "bakery", label: "Bakery / Roti / Pastry" },
+    { value: "warung", label: "Warung Makan" },
+    { value: "katering", label: "Katering" },
+    { value: "minuman", label: "Minuman / Bubble Tea / Jus" },
+  ] },
+  { label: "Retail", options: [
+    { value: "minimarket", label: "Minimarket / Toko Kelontong" },
+    { value: "fashion", label: "Fashion / Pakaian" },
+    { value: "elektronik", label: "Elektronik / Gadget" },
+    { value: "apotek", label: "Apotek / Kesehatan" },
+    { value: "toko-bangunan", label: "Toko Bangunan / Material" },
+    { value: "toko-lainnya", label: "Toko Lainnya" },
+  ] },
+  { label: "Lainnya", options: [
+    { value: "campuran", label: "F&B + Retail (Campuran)" },
+    { value: "lainnya", label: "Lainnya" },
+  ] },
+]
+
+const outletCounts = [{ options: [
+  { value: "1", label: "1 outlet" },
+  { value: "2-5", label: "2–5 outlet" },
+  { value: "6-10", label: "6–10 outlet" },
+  { value: "10+", label: "Lebih dari 10 outlet" },
+] }]
 
 export default function RegisterPage() {
   const router = useRouter()
   const [step, setStep] = useState(0)
   const [showPassword, setShowPassword] = useState(false)
   const [loading, setLoading] = useState(false)
-  const [error, setError] = useState("")
+  const [warning, setWarning] = useState<{ title?: string; messages: string[] } | null>(null)
   const [form, setForm] = useState({
     name: "",
     email: "",
@@ -29,18 +63,39 @@ export default function RegisterPage() {
 
   function handleNext(e: React.FormEvent) {
     e.preventDefault()
-    if (step === 0 && !isPasswordValid(form.password)) {
-      setError("Password harus memenuhi semua kriteria keamanan")
+
+    const issues: string[] = []
+    if (!form.name.trim()) issues.push("Nama lengkap wajib diisi")
+    if (!form.email.trim()) issues.push("Email wajib diisi")
+    else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim())) issues.push("Format email tidak valid (contoh: nama@toko.com)")
+    if (!form.phone.trim()) issues.push("Nomor WhatsApp wajib diisi")
+    if (!form.password) issues.push("Password wajib diisi")
+    else if (!isPasswordValid(form.password)) {
+      checkPassword(form.password).filter((r) => !r.ok).forEach((r) => issues.push(`Password: ${r.label}`))
+    }
+
+    if (issues.length > 0) {
+      setWarning({ title: "Lengkapi data dulu", messages: issues })
       return
     }
-    setError("")
     if (step < 2) setStep(step + 1)
   }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
+
+    const issues: string[] = []
+    if (!form.businessName.trim()) issues.push("Nama bisnis wajib diisi")
+    if (!form.businessType) issues.push("Jenis usaha wajib dipilih")
+    else if (form.businessType === "lainnya" && !form.businessTypeCustom.trim()) issues.push("Tulis jenis usaha Anda")
+    if (!form.outletCount) issues.push("Jumlah outlet wajib dipilih")
+    if (!form.plan) issues.push("Pilih salah satu paket langganan")
+
+    if (issues.length > 0) {
+      setWarning({ title: "Lengkapi data bisnis", messages: issues })
+      return
+    }
     setLoading(true)
-    setError("")
 
     try {
       const res = await fetch("/api/register", {
@@ -60,7 +115,7 @@ export default function RegisterPage() {
       })
 
       const data = await res.json()
-      if (!res.ok) { setError(data.error ?? "Terjadi kesalahan"); setLoading(false); return }
+      if (!res.ok) { setWarning({ title: "Gagal membuat akun", messages: [data.error ?? "Terjadi kesalahan"] }); setLoading(false); return }
 
       // Auto-login setelah register berhasil
       const login = await signIn("credentials", {
@@ -75,7 +130,7 @@ export default function RegisterPage() {
         setStep(2)
       }
     } catch {
-      setError("Koneksi gagal, coba lagi")
+      setWarning({ title: "Koneksi gagal", messages: ["Tidak dapat terhubung ke server, coba lagi."] })
     }
 
     setLoading(false)
@@ -85,9 +140,7 @@ export default function RegisterPage() {
     <div className="min-h-screen bg-white flex flex-col items-center justify-center px-4 py-12">
       {/* Logo */}
       <Link href="/" className="flex items-center gap-2 mb-8">
-        <div className="w-9 h-9 bg-blue-600 rounded-xl flex items-center justify-center">
-          <BarChart3 className="w-5 h-5 text-white" />
-        </div>
+        <PantauLogo className="h-9 w-9" priority />
         <span className="text-xl font-bold text-slate-900">Pantau</span>
       </Link>
 
@@ -130,7 +183,7 @@ export default function RegisterPage() {
               <h1 className="text-3xl font-light text-slate-900 mb-2 tracking-tight">Buat akun Anda</h1>
               <p className="text-slate-500 text-sm">Daftar dan langsung pakai setelah akun disetujui</p>
             </div>
-            <form onSubmit={handleNext} className="space-y-4">
+            <form onSubmit={handleNext} noValidate className="space-y-4">
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1.5">Nama Lengkap</label>
                 <input
@@ -199,9 +252,9 @@ export default function RegisterPage() {
                       </div>
                       <div className="grid grid-cols-2 gap-x-3 gap-y-1">
                         {rules.map((r) => (
-                          <div key={r.label} className={`flex items-center gap-1.5 text-xs transition-colors ${r.ok ? "text-emerald-600" : "text-slate-400"}`}>
-                            <div className={`w-3.5 h-3.5 rounded-full flex items-center justify-center shrink-0 transition-colors ${r.ok ? "bg-emerald-100" : "bg-slate-100"}`}>
-                              {r.ok && <Check className="w-2.5 h-2.5 text-emerald-600" />}
+                          <div key={r.label} className={`flex items-center gap-1.5 text-xs transition-colors ${r.ok ? "text-emerald-600" : "text-red-500"}`}>
+                            <div className={`w-3.5 h-3.5 rounded-full flex items-center justify-center shrink-0 transition-colors ${r.ok ? "bg-emerald-100" : "bg-red-100"}`}>
+                              {r.ok ? <Check className="w-2.5 h-2.5 text-emerald-600" /> : <X className="w-2.5 h-2.5 text-red-500" />}
                             </div>
                             {r.label}
                           </div>
@@ -228,10 +281,7 @@ export default function RegisterPage() {
               <h1 className="text-3xl font-light text-slate-900 mb-2 tracking-tight">Info bisnis Anda</h1>
               <p className="text-slate-500 text-sm">Kami sesuaikan sistem untuk kebutuhan Anda</p>
             </div>
-            <form onSubmit={handleSubmit} className="space-y-4">
-              {error && (
-                <div className="bg-red-50 border border-red-200 text-red-600 text-sm px-4 py-3 rounded-xl">{error}</div>
-              )}
+            <form onSubmit={handleSubmit} noValidate className="space-y-4">
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1.5">Nama Bisnis</label>
                 <input
@@ -244,36 +294,15 @@ export default function RegisterPage() {
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1.5">Jenis Usaha</label>
-                <select
-                  required
+                <label htmlFor="business-type" className="block text-sm font-medium text-slate-700 mb-1.5">Jenis Usaha</label>
+                <RegistrationSelect
+                  id="business-type"
                   value={form.businessType}
-                  onChange={(e) => setForm({ ...form, businessType: e.target.value, businessTypeCustom: "" })}
-                  className="w-full px-4 py-3 rounded-xl border border-slate-200 bg-white text-slate-900 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition"
-                >
-                  <option value="">Pilih jenis usaha</option>
-                  <optgroup label="Food &amp; Beverage">
-                    <option value="restoran">Restoran</option>
-                    <option value="kafe">Kafe / Coffee Shop</option>
-                    <option value="fastfood">Fast Food / Burger / Ayam</option>
-                    <option value="bakery">Bakery / Roti / Pastry</option>
-                    <option value="warung">Warung Makan</option>
-                    <option value="katering">Katering</option>
-                    <option value="minuman">Minuman / Bubble Tea / Jus</option>
-                  </optgroup>
-                  <optgroup label="Retail">
-                    <option value="minimarket">Minimarket / Toko Kelontong</option>
-                    <option value="fashion">Fashion / Pakaian</option>
-                    <option value="elektronik">Elektronik / Gadget</option>
-                    <option value="apotek">Apotek / Kesehatan</option>
-                    <option value="toko-bangunan">Toko Bangunan / Material</option>
-                    <option value="toko-lainnya">Toko Lainnya</option>
-                  </optgroup>
-                  <optgroup label="Lainnya">
-                    <option value="campuran">F&amp;B + Retail (Campuran)</option>
-                    <option value="lainnya">Lainnya</option>
-                  </optgroup>
-                </select>
+                  onValueChange={(value) => setForm({ ...form, businessType: value, businessTypeCustom: "" })}
+                  placeholder="Pilih jenis usaha"
+                  icon={UtensilsCrossed}
+                  groups={businessTypes}
+                />
                 {form.businessType === "lainnya" && (
                   <input
                     type="text"
@@ -282,24 +311,19 @@ export default function RegisterPage() {
                     value={form.businessTypeCustom}
                     onChange={(e) => setForm({ ...form, businessTypeCustom: e.target.value })}
                     className="mt-2 w-full px-4 py-3 rounded-xl border border-blue-300 bg-blue-50/40 text-slate-900 placeholder-slate-400 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition"
-                    autoFocus
                   />
                 )}
               </div>
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1.5">Jumlah Outlet</label>
-                <select
-                  required
+                <label htmlFor="outlet-count" className="block text-sm font-medium text-slate-700 mb-1.5">Jumlah Outlet</label>
+                <RegistrationSelect
+                  id="outlet-count"
                   value={form.outletCount}
-                  onChange={(e) => setForm({ ...form, outletCount: e.target.value })}
-                  className="w-full px-4 py-3 rounded-xl border border-slate-200 bg-white text-slate-900 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition"
-                >
-                  <option value="">Pilih jumlah outlet</option>
-                  <option value="1">1 outlet</option>
-                  <option value="2-5">2–5 outlet</option>
-                  <option value="6-10">6–10 outlet</option>
-                  <option value="10+">Lebih dari 10 outlet</option>
-                </select>
+                  onValueChange={(value) => setForm({ ...form, outletCount: value })}
+                  placeholder="Pilih jumlah outlet"
+                  icon={Store}
+                  groups={outletCounts}
+                />
               </div>
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1.5">Paket Langganan</label>
@@ -339,7 +363,7 @@ export default function RegisterPage() {
                 </button>
                 <button
                   type="submit"
-                  disabled={loading || !form.plan}
+                  disabled={loading}
                   className="flex-1 bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white font-semibold py-3 rounded-full transition-colors flex items-center justify-center gap-2"
                 >
                   {loading ? <><Loader2 className="w-4 h-4 animate-spin" /> Memproses...</> : "Buat Akun"}
@@ -376,6 +400,13 @@ export default function RegisterPage() {
           <Link href="/login" className="text-blue-600 hover:text-blue-700 font-semibold">Masuk</Link>
         </p>
       )}
+
+      <WarningModal
+        open={warning !== null}
+        onClose={() => setWarning(null)}
+        title={warning?.title}
+        messages={warning?.messages ?? []}
+      />
     </div>
   )
 }

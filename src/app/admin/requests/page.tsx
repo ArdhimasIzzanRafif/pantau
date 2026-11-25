@@ -43,7 +43,10 @@ export default function RequestsPage() {
     setLoading(false)
   }
 
-  useEffect(() => { load() }, [])
+  useEffect(() => {
+    const timeoutId = window.setTimeout(() => { void load() }, 0)
+    return () => window.clearTimeout(timeoutId)
+  }, [])
 
   async function act(id: string, action: string, plan?: string) {
     setDoing(id)

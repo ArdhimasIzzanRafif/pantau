@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react"
 import {
   TrendingDown, AlertTriangle, Store, ClipboardCheck,
-  ChevronRight, ShoppingBag, TrendingUp, Bell,
+  ChevronRight, Bell, Boxes, PackageMinus, ChartColumn,
 } from "lucide-react"
 import Link from "next/link"
 import { useSession } from "next-auth/react"
@@ -38,6 +38,13 @@ type ChartData  = {
   totalRevenue: number
   totalOrders: number
   avgOrder: number
+}
+
+type HppSummary = {
+  cogs: number
+  stockVariance: number
+  variancePercentage: number | null
+  incompleteCogsOrders: number
 }
 
 function formatRp(n: number) { return `Rp ${Math.round(n).toLocaleString("id-ID")}` }
@@ -75,6 +82,7 @@ export default function OwnerDashboard() {
 
   const [stats,  setStats]  = useState<Stats | null>(null)
   const [alerts, setAlerts] = useState<Alert[]>([])
+  const [hppSummary, setHppSummary] = useState<HppSummary | null>(null)
   const [loading, setLoading] = useState(true)
 
   // ── per-chart independent state ──
@@ -92,39 +100,54 @@ export default function OwnerDashboard() {
 
   useEffect(() => {
     async function load() {
-      const [statsRes, alertsRes] = await Promise.all([
+      const jakartaToday = new Intl.DateTimeFormat("en-CA", {
+        timeZone: "Asia/Jakarta", year: "numeric", month: "2-digit", day: "2-digit",
+      }).format(new Date())
+      const reportParams = new URLSearchParams({ from: `${jakartaToday.slice(0, 7)}-01`, to: jakartaToday })
+      const [statsRes, alertsRes, hppRes] = await Promise.all([
         fetch("/api/dashboard/stats"),
         fetch("/api/alerts?resolved=false"),
+        fetch(`/api/reports/hpp-stock-variance?${reportParams}`, { cache: "no-store" }),
       ])
       if (statsRes.ok) setStats(await statsRes.json())
       if (alertsRes.ok) setAlerts((await alertsRes.json()).slice(0, 4))
+      if (hppRes.ok) setHppSummary((await hppRes.json()).summary)
       setLoading(false)
     }
     load()
   }, [])
 
   useEffect(() => {
-    setLoadingTren(true)
-    fetch(`/api/dashboard/charts?days=${trenDays}`)
-      .then((r) => r.ok ? r.json() : null)
-      .then((d: ChartData | null) => { if (d) setTrenData({ dailySales: d.dailySales, totalRevenue: d.totalRevenue, totalOrders: d.totalOrders, avgOrder: d.avgOrder }) })
-      .finally(() => setLoadingTren(false))
+    const timeoutId = window.setTimeout(() => {
+      setLoadingTren(true)
+      fetch(`/api/dashboard/charts?days=${trenDays}`)
+        .then((r) => r.ok ? r.json() : null)
+        .then((d: ChartData | null) => { if (d) setTrenData({ dailySales: d.dailySales, totalRevenue: d.totalRevenue, totalOrders: d.totalOrders, avgOrder: d.avgOrder }) })
+        .finally(() => setLoadingTren(false))
+    }, 0)
+    return () => window.clearTimeout(timeoutId)
   }, [trenDays])
 
   useEffect(() => {
-    setLoadingProduk(true)
-    fetch(`/api/dashboard/charts?days=${produkDays}`)
-      .then((r) => r.ok ? r.json() : null)
-      .then((d: ChartData | null) => { if (d) setProdukData(d.topProducts) })
-      .finally(() => setLoadingProduk(false))
+    const timeoutId = window.setTimeout(() => {
+      setLoadingProduk(true)
+      fetch(`/api/dashboard/charts?days=${produkDays}`)
+        .then((r) => r.ok ? r.json() : null)
+        .then((d: ChartData | null) => { if (d) setProdukData(d.topProducts) })
+        .finally(() => setLoadingProduk(false))
+    }, 0)
+    return () => window.clearTimeout(timeoutId)
   }, [produkDays])
 
   useEffect(() => {
-    setLoadingJam(true)
-    fetch(`/api/dashboard/charts?days=${jamDays}`)
-      .then((r) => r.ok ? r.json() : null)
-      .then((d: ChartData | null) => { if (d) setJamData(d.hourlySales) })
-      .finally(() => setLoadingJam(false))
+    const timeoutId = window.setTimeout(() => {
+      setLoadingJam(true)
+      fetch(`/api/dashboard/charts?days=${jamDays}`)
+        .then((r) => r.ok ? r.json() : null)
+        .then((d: ChartData | null) => { if (d) setJamData(d.hourlySales) })
+        .finally(() => setLoadingJam(false))
+    }, 0)
+    return () => window.clearTimeout(timeoutId)
   }, [jamDays])
 
   if (loading) {
@@ -191,12 +214,40 @@ export default function OwnerDashboard() {
         </div>
       </div>
 
+      {/* ── HPP & selisih bulan berjalan ── */}
+      <Link
+        href="/dashboard/reports/hpp-stock-variance"
+        className="group grid grid-cols-1 gap-3 rounded-2xl border border-slate-200 bg-white p-4 transition-colors hover:border-blue-300 sm:grid-cols-[1fr_auto_auto_auto] sm:items-center sm:gap-6"
+      >
+        <div className="flex items-center gap-3">
+          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-600 text-white"><ChartColumn className="h-5 w-5" /></div>
+          <div>
+            <div className="font-semibold text-slate-800">HPP & Selisih Bulan Ini</div>
+            <div className="text-xs text-slate-400">Klik untuk rincian per outlet dan periode</div>
+          </div>
+        </div>
+        <div className="flex items-center gap-2 sm:block sm:text-right">
+          <Boxes className="h-4 w-4 text-indigo-500 sm:hidden" />
+          <div className="text-xs text-slate-400">HPP</div>
+          <div className="font-semibold text-slate-800">{hppSummary ? formatRpShort(hppSummary.cogs) : "—"}</div>
+        </div>
+        <div className="flex items-center gap-2 sm:block sm:text-right">
+          <PackageMinus className="h-4 w-4 text-amber-500 sm:hidden" />
+          <div className="text-xs text-slate-400">Selisih Stok</div>
+          <div className="font-semibold text-amber-700">{hppSummary ? formatRpShort(hppSummary.stockVariance) : "—"}</div>
+        </div>
+        <div className="flex items-center gap-2 sm:block sm:text-right">
+          <div className="text-xs text-slate-400">Selisih / HPP</div>
+          <div className="font-semibold text-rose-700">{hppSummary?.variancePercentage != null ? `${hppSummary.variancePercentage.toLocaleString("id-ID", { maximumFractionDigits: 2 })}%` : "—"}</div>
+        </div>
+      </Link>
+
       {/* ── Main: big chart (left 2/3) + sidebar (right 1/3) ── */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
 
         {/* Area chart */}
-        <div className="lg:col-span-2 bg-white rounded-2xl border border-slate-200 overflow-hidden flex flex-col">
-          <div className="px-6 py-4 flex items-center justify-between border-b border-slate-100 shrink-0">
+        <div className="lg:col-span-2 flex flex-col rounded-2xl border border-slate-200 bg-white p-6">
+          <div className="flex items-center justify-between mb-5 shrink-0">
             <div>
               <div className="font-semibold text-slate-800">Tren Penjualan</div>
               <div className="text-xs text-slate-400 mt-0.5">Revenue harian</div>
@@ -215,14 +266,14 @@ export default function OwnerDashboard() {
               ))}
             </div>
           </div>
-          <div className="px-4 pt-5 pb-4 flex-1 min-h-50">
+          <div className="flex-1 min-h-50">
             {loadingTren ? (
               <div className="flex items-center justify-center h-full">
                 <div className="w-7 h-7 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
               </div>
             ) : (
               <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={chartSales} margin={{ top: 4, right: 4, bottom: 0, left: 0 }}>
+                <AreaChart data={chartSales} margin={{ top: 4, right: 0, bottom: 0, left: -8 }}>
                   <defs>
                     <linearGradient id="blueGrad" x1="0" y1="0" x2="0" y2="1">
                       <stop offset="0%"   stopColor="#3b82f6" stopOpacity={0.28} />
@@ -231,7 +282,15 @@ export default function OwnerDashboard() {
                   </defs>
                   <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
                   <XAxis dataKey="label" tick={{ fontSize: 10, fill: "#94a3b8" }} axisLine={false} tickLine={false} />
-                  <YAxis tick={{ fontSize: 10, fill: "#94a3b8" }} axisLine={false} tickLine={false} tickFormatter={formatYTick} width={40} />
+                  <YAxis
+                    axisLine={false} tickLine={false} width={40}
+                    // Label rata kiri di x=0 supaya sejajar dengan huruf awal judul kartu.
+                    tick={({ y, payload }) => (
+                      <text x={0} y={y} dy="0.355em" textAnchor="start" fontSize={10} fill="#94a3b8">
+                        {formatYTick(Number(payload.value))}
+                      </text>
+                    )}
+                  />
                   <Tooltip content={<ChartTip />} />
                   <Area
                     type="monotone" dataKey="total" name="total"
@@ -291,16 +350,16 @@ export default function OwnerDashboard() {
                 {alerts.map((a) => (
                   <div key={a.id} className="px-4 py-3 flex gap-2.5 items-start">
                     <div className={`w-1.5 h-1.5 rounded-full mt-1.5 shrink-0 ${
-                      a.severity === "CRITICAL" ? "bg-red-500" : "bg-orange-400"
+                      a.severity === "INFO" ? "bg-blue-500" : "bg-red-500"
                     }`} />
                     <div className="flex-1 min-w-0">
                       <div className="text-xs font-medium text-slate-800 leading-snug">{a.title}</div>
                       <div className="text-[11px] text-slate-400 mt-0.5 line-clamp-1">{a.message}</div>
                     </div>
                     <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-semibold shrink-0 leading-none ${
-                      a.severity === "CRITICAL" ? "bg-red-100 text-red-700" : "bg-orange-100 text-orange-700"
+                      a.severity === "INFO" ? "bg-blue-100 text-blue-700" : "bg-red-100 text-red-700"
                     }`}>
-                      {a.severity === "CRITICAL" ? "Kritis" : "Warn"}
+                      {a.severity === "INFO" ? "Info" : "Kritis"}
                     </span>
                   </div>
                 ))}
@@ -359,7 +418,7 @@ export default function OwnerDashboard() {
         </div>
 
         {/* Hourly sales */}
-        <div className="bg-white rounded-2xl border border-slate-200 p-6">
+        <div className="flex min-h-80 flex-col rounded-2xl border border-slate-200 bg-white p-6">
           <div className="flex items-center justify-between mb-5">
             <div>
               <div className="font-semibold text-slate-800">Jam Tersibuk</div>
@@ -372,28 +431,30 @@ export default function OwnerDashboard() {
             </div>
           </div>
           {loadingJam ? (
-            <div className="flex items-center justify-center h-44">
+            <div className="flex min-h-52 flex-1 items-center justify-center">
               <div className="w-6 h-6 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
             </div>
           ) : (
-            <ResponsiveContainer width="100%" height={176}>
-              <BarChart
-                data={jamData.filter((h) => h.hour >= 6 && h.hour <= 22)}
-                margin={{ top: 0, right: 0, bottom: 0, left: -8 }}
-              >
-                <defs>
-                  <linearGradient id="barGrad" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%"   stopColor="#3b82f6" stopOpacity={1}   />
-                    <stop offset="100%" stopColor="#1d4ed8" stopOpacity={0.8} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
-                <XAxis dataKey="label" tick={{ fontSize: 9, fill: "#94a3b8" }} axisLine={false} tickLine={false} interval={2} />
-                <YAxis tick={{ fontSize: 10, fill: "#94a3b8" }} axisLine={false} tickLine={false} width={24} allowDecimals={false} />
-                <Tooltip content={<ChartTip />} />
-                <Bar dataKey="orders" name="order" fill="url(#barGrad)" radius={[4, 4, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
+            <div className="min-h-52 flex-1">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart
+                  data={jamData.filter((h) => h.hour >= 6 && h.hour <= 22)}
+                  margin={{ top: 4, right: 0, bottom: 0, left: -8 }}
+                >
+                  <defs>
+                    <linearGradient id="barGrad" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%"   stopColor="#3b82f6" stopOpacity={1}   />
+                      <stop offset="100%" stopColor="#1d4ed8" stopOpacity={0.8} />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
+                  <XAxis dataKey="label" tick={{ fontSize: 9, fill: "#94a3b8" }} axisLine={{ stroke: "#e2e8f0" }} tickLine={false} interval={2} />
+                  <YAxis tick={{ fontSize: 10, fill: "#94a3b8" }} axisLine={false} tickLine={false} width={24} allowDecimals={false} />
+                  <Tooltip content={<ChartTip />} />
+                  <Bar dataKey="orders" name="order" fill="url(#barGrad)" radius={[4, 4, 0, 0]} maxBarSize={28} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
           )}
         </div>
       </div>

@@ -2,6 +2,7 @@ import { prisma } from "@/lib/db"
 import { requireAdmin } from "@/lib/admin-auth"
 import { isResponse, ok } from "@/lib/api-helpers"
 import { NextResponse } from "next/server"
+import { effectiveOrganizationStatus } from "@/lib/organization-subscription"
 
 export async function GET() {
   try {
@@ -16,7 +17,6 @@ export async function GET() {
     const [
       totalOrgs, totalUsers, totalLocations,
       ordersThisMonth,
-      trialCount, activeCount, suspendedCount, cancelledCount, expiredCount,
       freeCount, starterCount, proCount, enterpriseCount,
       recentOrgs,
       usagePOS, usageReceipts, usageTransfers, usageOpnames, usageAlerts,
@@ -25,11 +25,6 @@ export async function GET() {
       prisma.user.count(),
       prisma.location.count(),
       prisma.pOSOrder.count({ where: { status: "PAID", paidAt: { gte: startOfMonth } } }),
-      prisma.organization.count({ where: { status: "TRIAL" } }),
-      prisma.organization.count({ where: { status: "ACTIVE" } }),
-      prisma.organization.count({ where: { status: "SUSPENDED" } }),
-      prisma.organization.count({ where: { status: "CANCELLED" } }),
-      prisma.organization.count({ where: { status: "EXPIRED" } }),
       prisma.organization.count({ where: { plan: "FREE" } }),
       prisma.organization.count({ where: { plan: "STARTER" } }),
       prisma.organization.count({ where: { plan: "PRO" } }),
@@ -54,16 +49,14 @@ export async function GET() {
     const activeIds = new Set(recentActiveOrgs.map((r) => r.organizationId))
 
     const healthCounts = { healthy: 0, at_risk: 0, inactive: 0, churn_risk: 0 }
+    const statusCounts = { PENDING: 0, TRIAL: 0, ACTIVE: 0, SUSPENDED: 0, CANCELLED: 0, EXPIRED: 0 }
     for (const org of allOrgs) {
+      const status = effectiveOrganizationStatus(org, now)
+      statusCounts[status]++
       const isActive = activeIds.has(org.id)
       const daysOld = Math.floor((now - org.createdAt.getTime()) / 86400000)
-      const trialDaysLeft = org.trialEndsAt
-        ? Math.ceil((org.trialEndsAt.getTime() - now) / 86400000)
-        : null
-      const trialExpired = org.status === "TRIAL" && trialDaysLeft !== null && trialDaysLeft < 0
-
       let h: keyof typeof healthCounts
-      if (trialExpired || org.status === "SUSPENDED" || org.status === "EXPIRED") {
+      if (status === "SUSPENDED" || status === "EXPIRED") {
         h = "churn_risk"
       } else if (isActive) {
         h = "healthy"
@@ -92,7 +85,7 @@ export async function GET() {
 
     return ok({
       totals: { orgs: totalOrgs, users: totalUsers, locations: totalLocations, ordersThisMonth },
-      byStatus: { TRIAL: trialCount, ACTIVE: activeCount, SUSPENDED: suspendedCount, CANCELLED: cancelledCount, EXPIRED: expiredCount },
+      byStatus: statusCounts,
       byPlan: { FREE: freeCount, STARTER: starterCount, PRO: proCount, ENTERPRISE: enterpriseCount },
       byHealth: healthCounts,
       usage: { posOrders: usagePOS, goodsReceipts: usageReceipts, stockTransfers: usageTransfers, opnames: usageOpnames, alerts: usageAlerts },

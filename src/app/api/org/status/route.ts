@@ -1,6 +1,7 @@
 import { auth } from "@/lib/auth"
 import { prisma } from "@/lib/db"
 import { NextResponse } from "next/server"
+import { effectiveOrganizationStatus } from "@/lib/organization-subscription"
 
 export async function GET() {
   const session = await auth()
@@ -11,8 +12,8 @@ export async function GET() {
 
   const org = await prisma.organization.findUnique({
     where: { id: orgId },
-    select: { status: true },
+    select: { status: true, trialEndsAt: true },
   })
 
-  return NextResponse.json({ status: org?.status ?? null })
+  return NextResponse.json({ status: org ? effectiveOrganizationStatus(org) : null })
 }

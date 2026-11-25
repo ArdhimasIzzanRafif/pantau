@@ -80,7 +80,7 @@ export async function PATCH(req: NextRequest) {
     const base = org?.trialEndsAt && org.trialEndsAt > new Date() ? org.trialEndsAt : new Date()
     await prisma.organization.update({
       where: { id },
-      data: { trialEndsAt: new Date(base.getTime() + 30 * 86400000) },
+      data: { trialEndsAt: new Date(base.getTime() + 30 * 86400000), status: "ACTIVE", suspendedAt: null },
     })
   }
 

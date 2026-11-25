@@ -2,6 +2,7 @@ import { NextRequest } from "next/server"
 import { prisma } from "@/lib/db"
 import { ok, err } from "@/lib/api-helpers"
 import { isGuestSessionId } from "@/lib/guest-bill"
+import { hasOrganizationAccess } from "@/lib/organization-subscription"
 
 // Only the opaque browser session grants access, never a shared table QR/name.
 export async function GET(req: NextRequest, { params }: { params: Promise<{ token: string }> }) {
@@ -12,9 +13,10 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ toke
 
   const location = await prisma.location.findUnique({
     where: { menuToken: token },
-    select: { id: true, isActive: true },
+    select: { id: true, isActive: true, organization: { select: { status: true, trialEndsAt: true } } },
   })
   if (!location || !location.isActive) return err("Outlet tidak ditemukan", 404)
+  if (!hasOrganizationAccess(location.organization)) return err("Layanan pemesanan bisnis sedang tidak aktif", 403)
 
   const selectFields = {
     id: true,

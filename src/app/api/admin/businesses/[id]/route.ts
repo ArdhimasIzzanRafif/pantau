@@ -3,6 +3,7 @@ import { requireAdmin } from "@/lib/admin-auth"
 import { isResponse, ok } from "@/lib/api-helpers"
 import { NextResponse } from "next/server"
 import { deleteOrganizationData } from "@/lib/delete-organization"
+import { effectiveOrganizationStatus } from "@/lib/organization-subscription"
 
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -29,7 +30,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     })
 
     if (!org) return NextResponse.json({ error: "Not found" }, { status: 404 })
-    return ok(org)
+    return ok({ ...org, status: effectiveOrganizationStatus(org) })
   } catch (e) {
     console.error("[admin/businesses/id]", e)
     return NextResponse.json({ error: String(e) }, { status: 500 })

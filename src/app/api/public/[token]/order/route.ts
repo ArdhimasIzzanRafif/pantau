@@ -4,16 +4,18 @@ import { ok, err } from "@/lib/api-helpers"
 import { asOrderError, assertPricedStockAvailable, priceOrderItems } from "@/lib/pos-orders"
 import { isGuestSessionId } from "@/lib/guest-bill"
 import { GuestSessionError, resolveGuestOrderIdentity } from "@/lib/guest-order-session"
+import { hasOrganizationAccess } from "@/lib/organization-subscription"
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ token: string }> }) {
   const { token } = await params
 
   const location = await prisma.location.findUnique({
     where: { menuToken: token },
-    include: { organization: { select: { id: true } } },
+    include: { organization: { select: { id: true, status: true, trialEndsAt: true } } },
   })
 
   if (!location || !location.isActive) return err("Outlet tidak ditemukan", 404)
+  if (!hasOrganizationAccess(location.organization)) return err("Layanan pemesanan bisnis sedang tidak aktif", 403)
 
   const body = await req.json() as Record<string, unknown>
   const { items, tableNumber, customerName, notes, guestSessionId, tableToken } = body

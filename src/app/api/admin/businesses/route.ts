@@ -2,6 +2,7 @@ import { prisma } from "@/lib/db"
 import { requireAdmin } from "@/lib/admin-auth"
 import { isResponse, ok, err } from "@/lib/api-helpers"
 import type { Prisma } from "@prisma/client"
+import { effectiveOrganizationStatus } from "@/lib/organization-subscription"
 
 function toAuditJson(value: unknown): Prisma.InputJsonValue {
   return JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue
@@ -42,14 +43,14 @@ export async function GET() {
   const result = orgs.map((org) => {
     const monthlyRevenue = org.posOrders.reduce((s, o) => s + Number(o.total), 0)
     const isRecentlyActive = activeOrgIds.has(org.id)
-    const trialExpired = org.trialEndsAt && org.trialEndsAt < now
+    const status = effectiveOrganizationStatus(org, now.getTime())
     const daysOld = Math.floor((now.getTime() - org.createdAt.getTime()) / 86400000)
 
     // Health score
     let health: "healthy" | "at_risk" | "inactive" | "churn_risk" = "healthy"
-    if (org.status === "SUSPENDED" || org.status === "CANCELLED") {
+    if (status === "SUSPENDED" || status === "CANCELLED") {
       health = "inactive"
-    } else if (trialExpired && org.status === "TRIAL") {
+    } else if (status === "EXPIRED") {
       health = "churn_risk"
     } else if (!isRecentlyActive && daysOld > 7) {
       health = org._count.posOrders === 0 ? "churn_risk" : "at_risk"
@@ -60,7 +61,7 @@ export async function GET() {
       name: org.name,
       slug: org.slug,
       plan: org.plan,
-      status: org.status,
+      status,
       trialEndsAt: org.trialEndsAt,
       lastActiveAt: org.lastActiveAt,
       suspendedAt: org.suspendedAt,
@@ -107,6 +108,7 @@ export async function PATCH(req: Request) {
     const base = org.trialEndsAt && org.trialEndsAt > new Date() ? org.trialEndsAt : new Date()
     data.trialEndsAt = new Date(base.getTime() + trialDays * 86400000)
     data.status = "ACTIVE"
+    data.suspendedAt = null
   } else {
     return err("Action tidak valid")
   }

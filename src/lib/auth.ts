@@ -3,6 +3,7 @@ import Credentials from "next-auth/providers/credentials"
 import { prisma } from "@/lib/db"
 import bcrypt from "bcryptjs"
 import { authConfig } from "./auth.config"
+import { effectiveOrganizationStatus } from "./organization-subscription"
 
 const IDENTITY_REFRESH_SECONDS = 30
 
@@ -16,6 +17,7 @@ function assignIdentity(
     role: string | null
     businessName: string | null
     orgStatus: string | null
+    orgExpiresAt: string | null
     orgPlan: string | null
     locationIds: string[]
     isSuperAdmin: boolean
@@ -27,7 +29,8 @@ function assignIdentity(
   token.organizationId = identity.organizationId
   token.role = identity.role
   token.businessName = identity.businessName
-  token.orgStatus = identity.orgStatus
+  token.orgStatus = effectiveOrganizationStatus({ status: identity.orgStatus, trialEndsAt: identity.orgExpiresAt })
+  token.orgExpiresAt = identity.orgExpiresAt
   token.orgPlan = identity.orgPlan
   token.locationIds = identity.locationIds
   token.isSuperAdmin = identity.isSuperAdmin
@@ -81,6 +84,7 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
           role: orgUser?.role ?? null,
           businessName: orgUser?.organization.name ?? null,
           orgStatus: orgUser?.organization.status ?? null,
+          orgExpiresAt: orgUser?.organization.trialEndsAt?.toISOString() ?? null,
           orgPlan: orgUser?.organization.plan ?? null,
           locationIds: orgUser?.assignedLocations.map((l) => l.locationId) ?? [],
           isSuperAdmin,
@@ -105,6 +109,7 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
           role: (user as unknown as Record<string, unknown>).role as string | null,
           businessName: (user as unknown as Record<string, unknown>).businessName as string | null,
           orgStatus: (user as unknown as Record<string, unknown>).orgStatus as string | null,
+          orgExpiresAt: ((user as unknown as Record<string, unknown>).orgExpiresAt as string | null) ?? null,
           orgPlan: (user as unknown as Record<string, unknown>).orgPlan as string | null,
           locationIds: ((user as unknown as Record<string, unknown>).locationIds as string[] | undefined) ?? [],
           isSuperAdmin: Boolean((user as unknown as Record<string, unknown>).isSuperAdmin),
@@ -114,7 +119,10 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
       const checkedAt = Number(token.identityCheckedAt ?? 0)
       const now = Math.floor(Date.now() / 1000)
       const email = typeof token.email === "string" ? token.email : ""
-      if (email && (trigger === "update" || !checkedAt || now - checkedAt >= IDENTITY_REFRESH_SECONDS)) {
+      const deadlineReached = typeof token.orgExpiresAt === "string"
+        && new Date(token.orgExpiresAt).getTime() <= Date.now()
+        && (token.orgStatus === "ACTIVE" || token.orgStatus === "TRIAL")
+      if (email && (trigger === "update" || token.orgExpiresAt === undefined || deadlineReached || !checkedAt || now - checkedAt >= IDENTITY_REFRESH_SECONDS)) {
         const currentUser = await prisma.user.findUnique({
           where: { email },
           include: {
@@ -140,6 +148,7 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
             role: membership?.role ?? null,
             businessName: membership?.organization.name ?? null,
             orgStatus: membership?.organization.status ?? null,
+            orgExpiresAt: membership?.organization.trialEndsAt?.toISOString() ?? null,
             orgPlan: membership?.organization.plan ?? null,
             locationIds: membership?.assignedLocations.map((location) => location.locationId) ?? [],
             isSuperAdmin: !!superAdminEmail && currentUser.email.toLowerCase() === superAdminEmail,
@@ -156,7 +165,11 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
       ;(session.user as unknown as Record<string, unknown>).organizationId = token.organizationId
       ;(session.user as unknown as Record<string, unknown>).role = token.role
       ;(session.user as unknown as Record<string, unknown>).businessName = token.businessName
-      ;(session.user as unknown as Record<string, unknown>).orgStatus = token.orgStatus
+      ;(session.user as unknown as Record<string, unknown>).orgStatus = effectiveOrganizationStatus({
+        status: typeof token.orgStatus === "string" ? token.orgStatus : null,
+        trialEndsAt: typeof token.orgExpiresAt === "string" ? token.orgExpiresAt : null,
+      })
+      ;(session.user as unknown as Record<string, unknown>).orgExpiresAt = token.orgExpiresAt
       ;(session.user as unknown as Record<string, unknown>).orgPlan = token.orgPlan
       ;(session.user as unknown as Record<string, unknown>).locationIds = token.locationIds
       ;(session.user as unknown as Record<string, unknown>).isSuperAdmin = token.isSuperAdmin

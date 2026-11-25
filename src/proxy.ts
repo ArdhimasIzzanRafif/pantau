@@ -1,6 +1,7 @@
 import NextAuth from "next-auth"
 import { authConfig } from "@/lib/auth.config"
 import { NextResponse } from "next/server"
+import { effectiveOrganizationStatus } from "@/lib/organization-subscription"
 
 const { auth: withAuth } = NextAuth(authConfig)
 
@@ -58,7 +59,11 @@ export default withAuth((req) => {
 
   // Block PENDING/SUSPENDED users dari dashboard/pos
   if (isLoggedIn && (pathname.startsWith("/dashboard") || pathname.startsWith("/pos"))) {
-    const orgStatus = (req.auth?.user as Record<string, unknown>)?.orgStatus
+    const identity = req.auth?.user as Record<string, unknown>
+    const orgStatus = effectiveOrganizationStatus({
+      status: typeof identity?.orgStatus === "string" ? identity.orgStatus : null,
+      trialEndsAt: typeof identity?.orgExpiresAt === "string" ? identity.orgExpiresAt : null,
+    })
     if (orgStatus === "PENDING") {
       return NextResponse.redirect(new URL("/pending", origin))
     }

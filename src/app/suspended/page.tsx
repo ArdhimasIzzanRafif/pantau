@@ -1,12 +1,14 @@
 "use client"
 
-import { signOut } from "next-auth/react"
+import { signOut, useSession } from "next-auth/react"
 import { useState } from "react"
 import { ShieldOff, Loader2 } from "lucide-react"
 import { OrganizationStatusGuard } from "@/components/organization-status-guard"
 
 export default function SuspendedPage() {
   const [signingOut, setSigningOut] = useState(false)
+  const { data: session } = useSession()
+  const expired = (session?.user as { orgStatus?: string } | undefined)?.orgStatus === "EXPIRED"
 
   async function handleSignOut() {
     setSigningOut(true)
@@ -22,9 +24,11 @@ export default function SuspendedPage() {
             <ShieldOff className="w-8 h-8 text-red-500" />
           </div>
 
-          <h1 className="text-xl font-bold text-slate-900 mb-2">Akun Ditangguhkan</h1>
+          <h1 className="text-xl font-bold text-slate-900 mb-2">{expired ? "Langganan Berakhir" : "Akun Ditangguhkan"}</h1>
           <p className="text-slate-500 text-sm leading-relaxed mb-8">
-            Akun bisnis Anda saat ini tidak aktif. Hubungi tim Pantau untuk informasi lebih lanjut.
+            {expired
+              ? "Masa langganan bisnis Anda sudah berakhir. Hubungi tim Pantau untuk memperpanjang dan mengaktifkan kembali akses."
+              : "Akun bisnis Anda saat ini tidak aktif. Hubungi tim Pantau untuk informasi lebih lanjut."}
           </p>
 
           <button

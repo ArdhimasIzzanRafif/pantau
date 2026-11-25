@@ -1,6 +1,7 @@
 import "server-only"
 import { prisma } from "@/lib/db"
 import { businessPhotoOwnerSelect, publicBusinessPhotoUrl } from "@/lib/public-business-photo"
+import { hasOrganizationAccess } from "@/lib/organization-subscription"
 
 export async function getPublicMenu(token: string, mejaToken?: string | null) {
   const location = await prisma.location.findUnique({
@@ -10,13 +11,15 @@ export async function getPublicMenu(token: string, mejaToken?: string | null) {
         select: {
           id: true,
           name: true,
+          status: true,
+          trialEndsAt: true,
           users: businessPhotoOwnerSelect,
         },
       },
     },
   })
 
-  if (!location || !location.isActive) return null
+  if (!location || !location.isActive || !hasOrganizationAccess(location.organization)) return null
 
   const table = mejaToken
     ? await prisma.table.findFirst({

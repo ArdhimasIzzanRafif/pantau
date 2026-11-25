@@ -1,6 +1,8 @@
 import { Prisma } from "@prisma/client"
 import { auth } from "@/lib/auth"
 import { NextResponse } from "next/server"
+import { prisma } from "@/lib/db"
+import { effectiveOrganizationStatus, hasOrganizationAccess } from "@/lib/organization-subscription"
 
 export type SessionUser = {
   id: string
@@ -20,6 +22,21 @@ export async function requireAuth(): Promise<SessionUser | NextResponse> {
   const user = session.user as typeof session.user & Partial<SessionUser>
   if (!user.organizationId || !user.role) {
     return NextResponse.json({ error: "Tidak ada organisasi" }, { status: 403 })
+  }
+  // Read on every API request: an old JWT must not keep an expired or suspended
+  // business operational, or prevent access immediately after an extension.
+  const organization = await prisma.organization.findUnique({
+    where: { id: user.organizationId },
+    select: { status: true, trialEndsAt: true },
+  })
+  if (!organization) return NextResponse.json({ error: "Tidak ada organisasi" }, { status: 403 })
+  if (!hasOrganizationAccess(organization)) {
+    const status = effectiveOrganizationStatus(organization)
+    return NextResponse.json({
+      error: status === "EXPIRED" ? "Langganan bisnis sudah berakhir. Hubungi admin untuk perpanjangan." : "Akun bisnis belum aktif atau ditangguhkan.",
+      code: status === "EXPIRED" ? "SUBSCRIPTION_EXPIRED" : "ORGANIZATION_INACTIVE",
+      status,
+    }, { status: 403 })
   }
   return {
     id: userId,

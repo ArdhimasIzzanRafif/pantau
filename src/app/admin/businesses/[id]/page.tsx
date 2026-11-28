@@ -12,7 +12,7 @@ type OrgUser = {
   assignedLocations: { location: { id: string; name: string } }[]
 }
 type OrgDetail = {
-  id: string; name: string; slug: string; plan: string; status: string
+  id: string; name: string; slug: string; plan: string; status: string; registrationAttempts: number
   ownerPhone: string | null; trialEndsAt: string | null; createdAt: string
   users: OrgUser[]
   locations: Location[]
@@ -34,11 +34,13 @@ const PLAN_LABEL: Record<string, string> = {
 }
 
 const STATUS_LABEL: Record<string, string> = {
+  REJECTED: "Ditolak · bisa daftar ulang",
   TRIAL: "Aktif", ACTIVE: "Aktif", PENDING: "Menunggu",
   SUSPENDED: "Ditangguhkan", CANCELLED: "Dibatalkan", EXPIRED: "Kedaluwarsa",
 }
 
 const STATUS_STYLE: Record<string, string> = {
+  REJECTED: "bg-amber-50 text-amber-700 border-amber-200",
   TRIAL:     "bg-emerald-50 text-emerald-600 border-emerald-200",
   ACTIVE:    "bg-emerald-50 text-emerald-600 border-emerald-200",
   PENDING:   "bg-amber-50 text-amber-600 border-amber-200",
@@ -175,6 +177,7 @@ export default function BusinessDetailPage() {
       </div>
 
       <div className="p-4 sm:p-7 space-y-5">
+        <p className="text-sm text-slate-500">Pengajuan ke-{org.registrationAttempts} dari 3. Penolakan ketiga menangguhkan akun; hanya admin yang dapat mengaktifkannya kembali.</p>
         {/* Info cards */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           {[

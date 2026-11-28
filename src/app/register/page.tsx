@@ -103,7 +103,7 @@ export default function RegisterPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           name: form.name,
-          email: form.email,
+          email: form.email.trim().toLowerCase(),
           phone: form.phone,
           password: form.password,
           businessName: form.businessName,
@@ -115,12 +115,12 @@ export default function RegisterPage() {
       })
 
       const data = await res.json()
-      if (!res.ok) { setWarning({ title: "Gagal membuat akun", messages: [data.error ?? "Terjadi kesalahan"] }); setLoading(false); return }
+      if (!res.ok) { setWarning({ title: "Pendaftaran belum berhasil", messages: [data.error ?? "Terjadi kesalahan"] }); setLoading(false); return }
 
       // Auto-login setelah register berhasil
       const login = await signIn("credentials", {
         redirect: false,
-        email: form.email,
+        email: form.email.trim().toLowerCase(),
         password: form.password,
       })
 
@@ -182,6 +182,7 @@ export default function RegisterPage() {
             <div className="mb-7">
               <h1 className="text-3xl font-light text-slate-900 mb-2 tracking-tight">Buat akun Anda</h1>
               <p className="text-slate-500 text-sm">Daftar dan langsung pakai setelah akun disetujui</p>
+              <p className="mt-3 text-xs leading-relaxed text-slate-500">Pernah ditolak? Daftar ulang di sini dengan email dan password sebelumnya. Maksimal 3 pengajuan; setelah penolakan ketiga, hubungi admin.</p>
             </div>
             <form onSubmit={handleNext} noValidate className="space-y-4">
               <div>

@@ -14,7 +14,7 @@ function landingPage(role?: string) {
 }
 
 function destinationFor(status: string | null, pathname: string, role?: string) {
-  if (status === "PENDING") return pathname === "/pending" ? null : "/pending"
+  if (status === "PENDING" || status === "REJECTED") return pathname === "/pending" ? null : "/pending"
   if (["SUSPENDED", "EXPIRED", "CANCELLED"].includes(status ?? "")) {
     return pathname === "/suspended" ? null : "/suspended"
   }
@@ -61,7 +61,10 @@ export function OrganizationStatusGuard() {
         const user = session?.user as { orgStatus?: string | null; role?: string } | undefined
         const destination = destinationFor(currentStatus, pathname, user?.role)
 
-        if (!destination) return
+        if (!destination) {
+          if (currentStatus !== user?.orgStatus) await update()
+          return
+        }
         redirecting.current = true
 
         try {

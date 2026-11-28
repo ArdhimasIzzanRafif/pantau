@@ -3,6 +3,7 @@ import { requireAdmin } from "@/lib/admin-auth"
 import { ok } from "@/lib/api-helpers"
 import { NextRequest, NextResponse } from "next/server"
 import { sendApprovalEmail } from "@/lib/email"
+import { reviewRegistration, registrationErrorResponse } from "@/lib/registration"
 
 export async function GET() {
   const admin = await requireAdmin()
@@ -12,7 +13,7 @@ export async function GET() {
     where: { status: "PENDING" },
     orderBy: { createdAt: "desc" },
     select: {
-      id: true, name: true, slug: true, plan: true, status: true,
+      id: true, name: true, slug: true, plan: true, status: true, registrationAttempts: true,
       ownerPhone: true, trialEndsAt: true, createdAt: true,
       _count: { select: { locations: { where: { isActive: true } }, users: true } },
       users: {
@@ -29,6 +30,7 @@ export async function GET() {
     slug: o.slug,
     plan: o.plan,
     status: o.status,
+    registrationAttempts: o.registrationAttempts,
     trialEndsAt: o.trialEndsAt,
     createdAt: o.createdAt,
     owner: o.users[0]?.user ?? null,
@@ -47,42 +49,31 @@ export async function PATCH(req: NextRequest) {
   const { id, action } = await req.json()
   if (!id || !action) return NextResponse.json({ error: "id dan action wajib" }, { status: 400 })
 
-  if (action === "approve") {
-    const trialEndsAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
-    const org = await prisma.organization.update({
-      where: { id },
-      data: { status: "ACTIVE", trialEndsAt },
-      select: {
-        name: true,
-        users: {
-          where: { role: "OWNER" },
-          take: 1,
-          select: { user: { select: { name: true, email: true } } },
-        },
-      },
-    })
-    const owner = org.users[0]?.user
-    if (owner) {
-      sendApprovalEmail({
-        ownerName: owner.name ?? "Pemilik",
-        ownerEmail: owner.email,
-        businessName: org.name,
-        trialEndsAt,
-      }).catch(console.error)
+  try {
+    if (action === "approve" || action === "reject") {
+      const result = await reviewRegistration(prisma, id, action, admin.email)
+      if (action === "approve" && result.owner && result.trialEndsAt) {
+        sendApprovalEmail({
+          ownerName: result.owner.name ?? "Pemilik", ownerEmail: result.owner.email,
+          businessName: result.name, trialEndsAt: result.trialEndsAt,
+        }).catch(console.error)
+      }
+      return ok({ ok: true, status: result.status, registrationAttempts: result.registrationAttempts })
     }
-  } else if (action === "reject") {
-    await prisma.organization.update({
-      where: { id },
-      data: { status: "SUSPENDED" },
-    })
-  } else if (action === "extend") {
-    const org = await prisma.organization.findUnique({ where: { id }, select: { trialEndsAt: true } })
-    const base = org?.trialEndsAt && org.trialEndsAt > new Date() ? org.trialEndsAt : new Date()
-    await prisma.organization.update({
-      where: { id },
-      data: { trialEndsAt: new Date(base.getTime() + 30 * 86400000), status: "ACTIVE", suspendedAt: null },
-    })
+    if (action === "extend") {
+      const org = await prisma.organization.findUnique({ where: { id }, select: { trialEndsAt: true } })
+      if (!org) return NextResponse.json({ error: "Bisnis tidak ditemukan" }, { status: 404 })
+      const base = org.trialEndsAt && org.trialEndsAt > new Date() ? org.trialEndsAt : new Date()
+      await prisma.organization.update({ where: { id }, data: {
+        trialEndsAt: new Date(base.getTime() + 30 * 86400000), status: "ACTIVE", suspendedAt: null,
+      } })
+      return ok({ ok: true })
+    }
+    return NextResponse.json({ error: "Action tidak valid" }, { status: 400 })
+  } catch (error) {
+    const failure = registrationErrorResponse(error)
+    if (failure) return NextResponse.json({ error: failure.error }, { status: failure.status })
+    console.error("Review registration error:", error)
+    return NextResponse.json({ error: "Gagal memproses pengajuan" }, { status: 500 })
   }
-
-  return ok({ ok: true })
 }

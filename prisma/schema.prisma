@@ -26,6 +26,7 @@ model Organization {
   orderCounter         Int       @default(0)
   plan                 Plan      @default(FREE)
   status               OrgStatus @default(TRIAL)
+  registrationAttempts Int       @default(1)
   trialEndsAt          DateTime?
   lastActiveAt         DateTime?
   suspendedAt          DateTime?
@@ -86,6 +87,7 @@ enum Plan {
 
 enum OrgStatus {
   PENDING
+  REJECTED
   TRIAL
   ACTIVE
   SUSPENDED

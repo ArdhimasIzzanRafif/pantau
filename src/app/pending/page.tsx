@@ -1,17 +1,19 @@
 "use client"
 
-import { signOut } from "next-auth/react"
+import { signOut, useSession } from "next-auth/react"
 import { useState } from "react"
 import { Clock, Loader2 } from "lucide-react"
 import { PantauLogo } from "@/components/pantau-logo"
 import { OrganizationStatusGuard } from "@/components/organization-status-guard"
 
 export default function PendingPage() {
+  const { data: session } = useSession()
+  const rejected = (session?.user as { orgStatus?: string } | undefined)?.orgStatus === "REJECTED"
   const [signingOut, setSigningOut] = useState(false)
 
   async function handleAccess() {
     setSigningOut(true)
-    await signOut({ redirect: false }); window.location.href = "/login"
+    await signOut({ redirect: false }); window.location.href = rejected ? "/register" : "/login"
   }
 
   return (
@@ -28,9 +30,11 @@ export default function PendingPage() {
             <Clock className="w-8 h-8 text-amber-500" />
           </div>
 
-          <h1 className="text-xl font-bold text-slate-900 mb-2">Pendaftaran Diterima</h1>
+          <h1 className="text-xl font-bold text-slate-900 mb-2">{rejected ? "Pengajuan Ditolak" : "Pendaftaran Diterima"}</h1>
           <p className="text-slate-500 text-sm leading-relaxed mb-8">
-            Akun Anda sedang ditinjau tim kami. Anda akan menerima email saat akun disetujui.
+            {rejected
+              ? "Anda masih bisa mendaftar ulang melalui formulir Daftar dengan email dan password akun yang sama. Setelah 3 kali pengajuan ditolak, hanya admin yang dapat mengaktifkan akun."
+              : "Akun Anda sedang ditinjau tim kami. Anda akan menerima email saat akun disetujui."}
           </p>
 
           <button
@@ -38,7 +42,7 @@ export default function PendingPage() {
             disabled={signingOut}
             className="w-full flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white font-semibold py-3 rounded-full transition-colors mb-4"
           >
-            {signingOut ? <><Loader2 className="w-4 h-4 animate-spin" /> Mengarahkan...</> : "Masuk ke Pantau →"}
+            {signingOut ? <><Loader2 className="w-4 h-4 animate-spin" /> Mengarahkan...</> : rejected ? "Daftar ulang →" : "Masuk ke Pantau →"}
           </button>
 
           <p className="text-xs text-slate-400">

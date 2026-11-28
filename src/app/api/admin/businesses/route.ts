@@ -62,6 +62,7 @@ export async function GET() {
       slug: org.slug,
       plan: org.plan,
       status,
+      registrationAttempts: org.registrationAttempts,
       trialEndsAt: org.trialEndsAt,
       lastActiveAt: org.lastActiveAt,
       suspendedAt: org.suspendedAt,

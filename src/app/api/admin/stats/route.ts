@@ -49,7 +49,7 @@ export async function GET() {
     const activeIds = new Set(recentActiveOrgs.map((r) => r.organizationId))
 
     const healthCounts = { healthy: 0, at_risk: 0, inactive: 0, churn_risk: 0 }
-    const statusCounts = { PENDING: 0, TRIAL: 0, ACTIVE: 0, SUSPENDED: 0, CANCELLED: 0, EXPIRED: 0 }
+    const statusCounts = { REJECTED: 0, PENDING: 0, TRIAL: 0, ACTIVE: 0, SUSPENDED: 0, CANCELLED: 0, EXPIRED: 0 }
     for (const org of allOrgs) {
       const status = effectiveOrganizationStatus(org, now)
       statusCounts[status]++

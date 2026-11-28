@@ -1,0 +1,1 @@
+ALTER TYPE "OrgStatus" ADD VALUE 'REJECTED';

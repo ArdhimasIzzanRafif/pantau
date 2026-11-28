@@ -5,20 +5,23 @@ import { useRouter } from "next/navigation"
 import { Building2, Users, MapPin, ShoppingBag, Loader2, Search, Trash2 } from "lucide-react"
 
 type Org = {
-  id: string; name: string; slug: string; plan: string; status: string
+  id: string; name: string; slug: string; plan: string; status: string; registrationAttempts: number
   trialEndsAt: string | null; createdAt: string
   owner: { email: string; name: string | null } | null
   counts: { users: number; locations: number; orders: number }
   health: string; daysOld: number
 }
 
-const STATUSES = ["ACTIVE", "SUSPENDED", "CANCELLED", "EXPIRED"]
+const STATUSES = ["PENDING", "REJECTED", "ACTIVE", "SUSPENDED", "CANCELLED", "EXPIRED"]
 
 const STATUS_FILTER_LABEL: Record<string, string> = {
+  PENDING: "Menunggu", REJECTED: "Ditolak",
   ACTIVE: "Aktif", SUSPENDED: "Ditangguhkan", CANCELLED: "Dibatalkan", EXPIRED: "Kedaluwarsa",
 }
 
 const STATUS_LABEL: Record<string, string> = {
+  REJECTED: "Ditolak · bisa daftar ulang",
+  PENDING: "Menunggu",
   TRIAL:     "Aktif",
   ACTIVE:    "Aktif",
   SUSPENDED: "Ditangguhkan",
@@ -27,6 +30,8 @@ const STATUS_LABEL: Record<string, string> = {
 }
 
 const STATUS_STYLE: Record<string, string> = {
+  REJECTED: "bg-amber-50 text-amber-700 border-amber-200",
+  PENDING: "bg-amber-50 text-amber-600 border-amber-200",
   TRIAL:     "bg-emerald-50 text-emerald-600 border-emerald-200",
   ACTIVE:    "bg-emerald-50 text-emerald-600 border-emerald-200",
   SUSPENDED: "bg-red-50 text-red-600 border-red-200",
@@ -142,6 +147,7 @@ export default function BusinessesPage() {
                       </div>
                       <div>
                         <div className="font-semibold text-slate-900 text-sm">{org.name}</div>
+                        <div className="text-xs text-slate-400">Pengajuan {org.registrationAttempts}/3</div>
                         <div className="text-xs text-slate-400">{org.slug}</div>
                       </div>
                     </div>

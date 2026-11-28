@@ -44,6 +44,8 @@ export default withAuth((req) => {
     if (isSuperAdmin) {
       return NextResponse.redirect(new URL("/admin", origin))
     }
+    const signupStatus = (req.auth?.user as Record<string, unknown>)?.orgStatus
+    if (pathname === "/register" && signupStatus === "REJECTED") return NextResponse.next()
     const role = (req.auth?.user as Record<string, unknown>)?.role ?? "OWNER"
     const dest =
       role === "KASIR"
@@ -64,7 +66,7 @@ export default withAuth((req) => {
       status: typeof identity?.orgStatus === "string" ? identity.orgStatus : null,
       trialEndsAt: typeof identity?.orgExpiresAt === "string" ? identity.orgExpiresAt : null,
     })
-    if (orgStatus === "PENDING") {
+    if (orgStatus === "PENDING" || orgStatus === "REJECTED") {
       return NextResponse.redirect(new URL("/pending", origin))
     }
     if (orgStatus === "SUSPENDED" || orgStatus === "EXPIRED" || orgStatus === "CANCELLED") {

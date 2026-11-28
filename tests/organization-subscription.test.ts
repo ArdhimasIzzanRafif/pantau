@@ -24,7 +24,7 @@ test("timestamp UTC, WIB, dan Date mengacu ke batas akses yang sama", () => {
 })
 
 test("penangguhan/pembatalan tidak dibuka hanya karena tanggal masih berlaku", () => {
-  for (const status of ["PENDING", "SUSPENDED", "CANCELLED", "EXPIRED"]) {
+  for (const status of ["PENDING", "REJECTED", "SUSPENDED", "CANCELLED", "EXPIRED"]) {
     const org = { status, trialEndsAt: new Date(at + 86400000) }
     assert.equal(effectiveOrganizationStatus(org, at), status)
     assert.equal(hasOrganizationAccess(org, at), false)

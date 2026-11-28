@@ -4,6 +4,7 @@ import { isResponse, ok } from "@/lib/api-helpers"
 import { NextResponse } from "next/server"
 import { deleteOrganizationData } from "@/lib/delete-organization"
 import { effectiveOrganizationStatus } from "@/lib/organization-subscription"
+import { Prisma } from "@prisma/client"
 
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -43,21 +44,15 @@ export async function DELETE(_req: Request, { params }: { params: Promise<{ id: 
 
   const { id } = await params
 
-  // Simpan daftar user lebih dulu; user dapat menjadi anggota organisasi lain.
-  const orgUsers = await prisma.organizationUser.findMany({
-    where: { organizationId: id },
-    select: { userId: true },
-  })
-
-  await deleteOrganizationData(prisma, id)
-
-  // Hapus user yang tidak punya org lain
-  for (const { userId } of orgUsers) {
-    const stillHasOrg = await prisma.organizationUser.count({ where: { userId } })
-    if (stillHasOrg === 0) {
-      await prisma.user.delete({ where: { id: userId } })
+  try {
+    await deleteOrganizationData(prisma, id, { removeOrphanedUsers: true, adminEmail: admin.email })
+    return ok({ ok: true })
+  } catch (error) {
+    console.error("[admin/businesses/delete]", error)
+    if (error instanceof Prisma.PrismaClientKnownRequestError) {
+      if (error.code === "P2028") return NextResponse.json({ error: "Penghapusan terlalu lama. Silakan coba lagi." }, { status: 503 })
+      if (error.code === "P2003") return NextResponse.json({ error: "Bisnis masih terhubung dengan data lain. Penghapusan dibatalkan." }, { status: 409 })
     }
+    return NextResponse.json({ error: "Bisnis gagal dihapus. Silakan coba lagi." }, { status: 500 })
   }
-
-  return ok({ ok: true })
 }

@@ -1,4 +1,6 @@
-import type { PrismaClient } from "@prisma/client"
+import { Prisma, type PrismaClient } from "@prisma/client"
+
+type DeleteOrganizationOptions = { removeOrphanedUsers?: boolean; adminEmail?: string }
 
 /**
  * Hapus satu organisasi beserta data lintas-modulnya dengan urutan anak → induk.
@@ -8,8 +10,19 @@ import type { PrismaClient } from "@prisma/client"
  * Karena itu penghapusan organisasi tidak boleh hanya mengandalkan satu
  * `organization.delete()`.
  */
-export async function deleteOrganizationData(prisma: PrismaClient, organizationId: string) {
+export async function deleteOrganizationData(prisma: PrismaClient, organizationId: string, options: DeleteOrganizationOptions = {}) {
   return prisma.$transaction(async (tx) => {
+    const org = await tx.organization.findUnique({ where: { id: organizationId }, select: { id: true, name: true } })
+    if (!org) return null
+    const members = options.removeOrphanedUsers
+      ? await tx.organizationUser.findMany({ where: { organizationId }, select: { userId: true } })
+      : []
+    const userIds = [...new Set(members.map((member) => member.userId))]
+    if (userIds.length) {
+      // Prevent a concurrent membership/transaction from being attached while
+      // deciding whether an otherwise unused user can be removed.
+      await tx.$queryRaw(Prisma.sql`SELECT id FROM "User" WHERE id IN (${Prisma.join(userIds)}) ORDER BY id FOR UPDATE`)
+    }
     // POS
     await tx.pOSOrderItemModifier.deleteMany({ where: { orderItem: { order: { organizationId } } } })
     await tx.pOSPayment.deleteMany({ where: { order: { organizationId } } })
@@ -73,6 +86,26 @@ export async function deleteOrganizationData(prisma: PrismaClient, organizationI
     await tx.location.deleteMany({ where: { organizationId } })
     await tx.organizationWhatsApp.deleteMany({ where: { organizationId } })
 
-    return tx.organization.delete({ where: { id: organizationId } })
-  })
+    const deleted = await tx.organization.delete({ where: { id: organizationId } })
+    if (userIds.length) {
+      const unused = await tx.user.findMany({ where: {
+        id: { in: userIds }, organizations: { none: {} },
+        posOrdersAsCashier: { none: {} }, posShiftsAsCashier: { none: {} },
+      }, select: { id: true, email: true } })
+      if (unused.length) {
+        await tx.verificationToken.deleteMany({ where: { OR: [
+          { identifier: { in: unused.map((user) => user.email) } },
+          ...unused.map((user) => ({ identifier: { startsWith: `registration-retry:${user.id}:` } })),
+        ] } })
+        await tx.user.deleteMany({ where: { id: { in: unused.map((user) => user.id) } } })
+      }
+    }
+    if (options.adminEmail) {
+      await tx.platformAuditLog.create({ data: {
+        adminEmail: options.adminEmail, action: "delete_organization", targetType: "organization",
+        targetId: organizationId, before: { name: org.name }, after: { deleted: true },
+      } })
+    }
+    return deleted
+  }, { maxWait: 10_000, timeout: 30_000 })
 }

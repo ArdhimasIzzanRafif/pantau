@@ -65,20 +65,55 @@ export default function BusinessesPage() {
   const [filterStatus, setFilter] = useState("all")
   const [deleting, setDeleting]   = useState<string | null>(null)
   const [confirmId, setConfirmId] = useState<string | null>(null)
+  const [deleteError, setDeleteError] = useState<string | null>(null)
+  const [loadError, setLoadError] = useState(false)
+  const [now, setNow] = useState(() => Date.now())
 
   async function handleDelete(id: string) {
+    if (deleting) return
     setDeleting(id)
-    await fetch(`/api/admin/businesses/${id}`, { method: "DELETE" })
-    await load()
-    setDeleting(null)
-    setConfirmId(null)
+    setDeleteError(null)
+    const controller = new AbortController()
+    const timer = window.setTimeout(() => controller.abort(), 60_000)
+    try {
+      const response = await fetch(`/api/admin/businesses/${id}`, { method: "DELETE", signal: controller.signal })
+      if (!response.ok) {
+        const result = await response.json().catch(() => null)
+        throw new Error(response.status === 401 || response.status === 403
+          ? "Silakan masuk kembali sebagai admin."
+          : result?.error ?? "Bisnis gagal dihapus. Coba lagi.")
+      }
+      setOrgs((current) => current.filter((org) => org.id !== id))
+      setConfirmId(null)
+    } catch (error) {
+      setDeleteError(controller.signal.aborted
+        ? "Proses terlalu lama. Muat ulang untuk memeriksa hasilnya."
+        : error instanceof Error ? error.message : "Koneksi gagal. Coba lagi.")
+    } finally {
+      window.clearTimeout(timer)
+      setDeleting(null)
+    }
   }
 
   async function load() {
-    const data = await fetch("/api/admin/businesses").then((r) => r.ok ? r.json() : [])
-    setOrgs(data); setLoading(false)
+    try {
+      const response = await fetch("/api/admin/businesses", { cache: "no-store" })
+      if (!response.ok) throw new Error("Gagal memuat bisnis")
+      const data = await response.json()
+      if (!Array.isArray(data)) throw new Error("Data tidak valid")
+      setOrgs(data)
+      setNow(Date.now())
+      setLoadError(false)
+    } catch {
+      setLoadError(true)
+    } finally {
+      setLoading(false)
+    }
   }
-  useEffect(() => { load() }, [])
+  useEffect(() => {
+    const timer = window.setTimeout(() => { void load() }, 0)
+    return () => window.clearTimeout(timer)
+  }, [])
 
   const filtered = orgs.filter((o) => {
     const q = search.toLowerCase()
@@ -101,8 +136,9 @@ export default function BusinessesPage() {
       {/* Header */}
       <div className="mb-6">
         <h1 className="text-xl font-semibold text-slate-900">Businesses</h1>
-        <p className="text-slate-400 text-sm mt-0.5">{orgs.length} bisnis terdaftar</p>
+        <p className="text-slate-400 text-sm mt-0.5">{loadError ? "Data belum dimuat" : `${orgs.length} bisnis terdaftar`}</p>
       </div>
+      {loadError && <div role="alert" className="mb-4 flex items-center justify-between rounded-xl bg-red-50 p-3 text-sm text-red-700"><span>Gagal memuat bisnis.</span><button onClick={() => void load()} className="font-semibold underline">Coba lagi</button></div>}
 
       {/* Filter */}
       <div className="flex flex-wrap items-center gap-3 mb-4">
@@ -133,7 +169,7 @@ export default function BusinessesPage() {
           <tbody className="divide-y divide-slate-50">
             {filtered.map((org) => {
               const tl = org.trialEndsAt
-                ? Math.ceil((new Date(org.trialEndsAt).getTime() - Date.now()) / 86400000)
+                ? Math.ceil((new Date(org.trialEndsAt).getTime() - now) / 86400000)
                 : null
 
               return (
@@ -217,7 +253,9 @@ export default function BusinessesPage() {
                       <Loader2 className="w-4 h-4 animate-spin text-slate-300" />
                     ) : (
                       <button
-                        onClick={() => setConfirmId(org.id)}
+                        onClick={() => { setDeleteError(null); setConfirmId(org.id) }}
+                        disabled={deleting !== null}
+                        aria-label={`Hapus ${org.name}`}
                         className="p-1.5 rounded-lg text-slate-300 hover:text-red-500 hover:bg-red-50 transition-colors"
                       >
                         <Trash2 className="w-4 h-4" />
@@ -230,7 +268,7 @@ export default function BusinessesPage() {
           </tbody>
         </table>
 
-        {filtered.length === 0 && (
+        {!loadError && filtered.length === 0 && (
           <div className="flex flex-col items-center justify-center py-20 text-slate-400">
             <Building2 className="w-8 h-8 mb-3 opacity-30" />
             <p className="text-sm">{search || filterStatus !== "all" ? "Tidak ada hasil" : "Belum ada bisnis"}</p>
@@ -241,22 +279,23 @@ export default function BusinessesPage() {
       {/* Confirm delete modal */}
       {confirmId && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-          <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-2xl max-w-sm w-full mx-4">
+          <div role="dialog" aria-modal="true" aria-labelledby="delete-business-title" aria-describedby="delete-business-description" aria-busy={deleting !== null} className="bg-white rounded-2xl border border-slate-200 p-6 shadow-2xl max-w-sm w-full mx-4">
             <div className="w-10 h-10 bg-red-50 rounded-xl flex items-center justify-center mb-4">
               <Trash2 className="w-5 h-5 text-red-500" />
             </div>
-            <h3 className="font-semibold text-slate-900 mb-1">Hapus Bisnis?</h3>
-            <p className="text-sm text-slate-500 mb-5">
-              Semua data bisnis ini — outlet, user, stok, order, dan transaksi — akan dihapus permanen dan tidak bisa dikembalikan.
+            <h3 id="delete-business-title" className="font-semibold text-slate-900 mb-1">Hapus bisnis?</h3>
+            <p id="delete-business-description" className="text-sm leading-relaxed text-slate-500 mb-5 break-words">
+              <strong className="font-medium text-slate-700">{orgs.find((org) => org.id === confirmId)?.name ?? "Bisnis ini"}</strong> dan seluruh datanya akan dihapus permanen.
             </p>
+            {deleteError && <p role="alert" className="mb-4 rounded-xl bg-red-50 p-3 text-sm text-red-700">{deleteError}</p>}
             <div className="flex gap-2">
-              <button onClick={() => setConfirmId(null)}
-                className="flex-1 px-4 py-2.5 rounded-xl border border-slate-200 text-sm font-medium text-slate-600 hover:bg-slate-50 transition-colors">
+              <button onClick={() => setConfirmId(null)} disabled={deleting !== null}
+                className="flex-1 px-4 py-2.5 rounded-xl border border-slate-200 text-sm font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-50 transition-colors">
                 Batal
               </button>
-              <button onClick={() => handleDelete(confirmId)}
-                className="flex-1 px-4 py-2.5 rounded-xl bg-red-500 hover:bg-red-600 text-white text-sm font-semibold transition-colors flex items-center justify-center gap-2">
-                {deleting === confirmId ? <Loader2 className="w-4 h-4 animate-spin" /> : "Ya, Hapus"}
+              <button onClick={() => void handleDelete(confirmId)} disabled={deleting !== null}
+                className="flex-1 px-4 py-2.5 rounded-xl bg-red-500 hover:bg-red-600 text-white text-sm font-semibold disabled:opacity-60 transition-colors flex items-center justify-center gap-2">
+                {deleting === confirmId ? <><Loader2 className="w-4 h-4 animate-spin" /> Menghapus...</> : "Hapus"}
               </button>
             </div>
           </div>

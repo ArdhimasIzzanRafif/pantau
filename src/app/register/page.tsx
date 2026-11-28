@@ -195,7 +195,6 @@ function RegistrationForm() {
             <div className="mb-7">
               <h1 className="text-3xl font-light text-slate-900 mb-2 tracking-tight">Buat akun Anda</h1>
               <p className="text-slate-500 text-sm">Daftar dan langsung pakai setelah akun disetujui</p>
-              <p className="mt-3 text-xs leading-relaxed text-slate-500">Pernah ditolak? Daftar ulang dengan email yang sama. Nama, toko, WhatsApp, dan password boleh diperbarui. Password baru memerlukan verifikasi email. Maksimal 3 pengajuan.</p>
               {retryToken && <p role="status" className="mt-3 rounded-xl bg-blue-50 p-3 text-sm leading-relaxed text-blue-700">Lanjutkan daftar ulang dengan email yang terisi di bawah. Lengkapi data Anda dan masukkan password baru, lalu kirim pengajuan.</p>}
             </div>
             <form onSubmit={handleNext} noValidate className="space-y-4">

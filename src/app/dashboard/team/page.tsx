@@ -45,6 +45,10 @@ const emptyLocationForm: LocationForm = {
   fulfillmentWarehouseId: "",
 }
 
+const locationInputClass = "min-h-12 w-full min-w-0 rounded-xl border border-slate-200 bg-white px-4 py-3 text-base leading-6 text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 sm:text-sm"
+const locationLabelClass = "mb-2 block text-sm font-medium leading-5 text-slate-700"
+const locationHelpClass = "mt-2 text-xs leading-5 text-slate-500"
+
 const ROLES = [
   { value: "ADMIN_GUDANG", label: "Admin Gudang", desc: "Kelola inventori & transfer", icon: Package },
   { value: "SUPERVISOR",   label: "Supervisor",   desc: "Konfirmasi opname & transfer", icon: Eye },
@@ -833,76 +837,81 @@ function LocationTab({
       </div>
 
       {showForm && isOwner && (
-        <div className="bg-white rounded-2xl border border-slate-200 p-6">
-          <h2 className="font-semibold text-slate-900 mb-4">Tambah {label} Baru</h2>
-          <FormAlert message={error} />
-          <div className="space-y-4">
-            <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1.5">Nama {label} *</label>
+        <div className="rounded-2xl border border-slate-200 bg-white p-5 sm:p-6">
+          <h2 className="mb-6 text-lg font-semibold leading-7 text-slate-900">Tambah {label} Baru</h2>
+          {error && <div className="mb-6"><FormAlert message={error} /></div>}
+          <div className="grid grid-cols-1 gap-x-6 gap-y-6 sm:grid-cols-2">
+            <div className="min-w-0">
+              <label htmlFor="new-location-name" className={locationLabelClass}>Nama {label} <span className="text-red-500">*</span></label>
               <input
+                id="new-location-name"
                 type="text"
                 required
                 placeholder={isGudang ? "Gudang Utama, Gudang Barat..." : "Outlet Denpasar, Cabang Kuta..."}
                 value={form.name}
                 onChange={(e) => setForm({ ...form, name: e.target.value })}
-                className="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className={locationInputClass}
               />
             </div>
-            <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1.5">Alamat</label>
+            <div className="min-w-0">
+              <label htmlFor="new-location-address" className={locationLabelClass}>Alamat <span className="font-normal text-slate-400">(opsional)</span></label>
               <input
+                id="new-location-address"
                 type="text"
-                placeholder="Jl. Contoh No. 1, Kota... (opsional)"
+                placeholder="Jl. Contoh No. 1, Kota"
                 value={form.address}
                 onChange={(e) => setForm({ ...form, address: e.target.value })}
-                className="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className={locationInputClass}
               />
             </div>
-            <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1.5">{isGudang ? "Nomor WhatsApp admin gudang" : "Nomor WhatsApp penanggung jawab outlet"}</label>
+            <div className="min-w-0">
+              <label htmlFor="new-location-phone" className={locationLabelClass}>{isGudang ? "WhatsApp admin gudang" : "WhatsApp penanggung jawab"}</label>
               <input
+                id="new-location-phone"
+                aria-describedby="new-location-phone-help"
                 type="tel"
                 inputMode="tel"
                 placeholder="Contoh: +62 800-0000-0000"
                 value={form.whatsappPhone}
                 onChange={(e) => setForm({ ...form, whatsappPhone: e.target.value })}
-                className="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className={locationInputClass}
               />
-              <p className="mt-1 text-xs text-slate-400">{isGudang ? "Peringatan stok outlet yang dipasok gudang ini dikirim ke nomor ini." : "Nomor penanggung jawab outlet untuk kebutuhan komunikasi operasional. Peringatan stok outlet dikirim ke gudang pemenuhannya."}</p>
+              <p id="new-location-phone-help" className={locationHelpClass}>{isGudang ? "Menerima peringatan stok outlet yang dipasok gudang ini." : "Untuk komunikasi operasional outlet."}</p>
             </div>
             {!isGudang && (
-              <div>
-                <label htmlFor="new-outlet-warehouse" className="block text-sm font-medium text-slate-700 mb-1.5">Gudang pemenuhan outlet</label>
+              <div className="min-w-0">
+                <label htmlFor="new-outlet-warehouse" className={locationLabelClass}>Gudang pemenuhan</label>
                 <div className="relative min-w-0">
                   <select
                     id="new-outlet-warehouse"
+                    aria-describedby="new-outlet-warehouse-help"
                     value={form.fulfillmentWarehouseId}
                     onChange={(e) => setForm({ ...form, fulfillmentWarehouseId: e.target.value })}
-                    className="min-h-11 w-full min-w-0 appearance-none truncate rounded-xl border border-slate-200 bg-white py-2.5 pl-4 pr-10 text-base text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500 sm:text-sm"
+                    className={`${locationInputClass} appearance-none truncate pr-10`}
                   >
                     <option value="">Belum dipasangkan</option>
                     {warehouses.map((warehouse) => <option key={warehouse.id} value={warehouse.id}>{warehouse.name}</option>)}
                   </select>
                   <ChevronDown aria-hidden="true" className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
                 </div>
-                <p className="mt-1 text-xs text-slate-400">Stok outlet yang menipis akan meminta barang dari gudang ini.</p>
+                <p id="new-outlet-warehouse-help" className={locationHelpClass}>Permintaan stok outlet diteruskan ke gudang ini.</p>
               </div>
             )}
-            <div className="flex gap-3">
-              <button
-                onClick={onAdd}
-                disabled={submitting || !form.name.trim()}
-                className="flex items-center gap-2 px-5 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white text-sm font-semibold rounded-full transition-colors"
-              >
-                {submitting ? <><Loader2 className="w-4 h-4 animate-spin" /> Menyimpan...</> : `Simpan ${label}`}
-              </button>
-              <button
-                onClick={() => { setShowForm(false); setForm(emptyLocationForm) }}
-                className="px-5 py-2.5 text-sm font-medium text-slate-600 hover:text-slate-900 border border-slate-200 hover:border-slate-300 rounded-xl transition-colors"
-              >
-                Batal
-              </button>
-            </div>
+          </div>
+          <div className="mt-6 flex flex-col gap-3 border-t border-slate-100 pt-5 sm:flex-row">
+            <button
+              onClick={onAdd}
+              disabled={submitting || !form.name.trim()}
+              className="flex min-h-11 items-center justify-center gap-2 rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-semibold leading-6 text-white transition-colors hover:bg-blue-700 disabled:opacity-60"
+            >
+              {submitting ? <><Loader2 className="w-4 h-4 animate-spin" /> Menyimpan...</> : `Simpan ${label}`}
+            </button>
+            <button
+              onClick={() => { setShowForm(false); setForm(emptyLocationForm) }}
+              className="min-h-11 rounded-xl border border-slate-200 px-5 py-2.5 text-sm font-medium leading-6 text-slate-600 transition-colors hover:border-slate-300 hover:text-slate-900"
+            >
+              Batal
+            </button>
           </div>
         </div>
       )}

@@ -103,8 +103,8 @@ export default function HppStockVarianceReportPage() {
 
   const summary = report?.summary
   const cards = [
-    { label: "Omzet", value: formatRp(summary?.revenue ?? 0), icon: BadgeDollarSign, tone: "bg-blue-50 text-blue-700" },
-    { label: "HPP Bahan", value: formatRp(summary?.cogs ?? 0), icon: Boxes, tone: "bg-indigo-50 text-indigo-700" },
+    { label: "Total Penjualan", value: formatRp(summary?.revenue ?? 0), icon: BadgeDollarSign, tone: "bg-blue-50 text-blue-700" },
+    { label: "Biaya Bahan", value: formatRp(summary?.cogs ?? 0), icon: Boxes, tone: "bg-indigo-50 text-indigo-700" },
     { label: "Laba Kotor", value: formatRp(summary?.grossProfit ?? 0), icon: TrendingUp, tone: "bg-emerald-50 text-emerald-700" },
     { label: "Selisih Stok", value: formatRp(summary?.stockVariance ?? 0), icon: PackageMinus, tone: "bg-amber-50 text-amber-700" },
     { label: "Persentase Selisih", value: formatPercent(summary?.variancePercentage), icon: CircleDollarSign, tone: "bg-rose-50 text-rose-700" },
@@ -118,8 +118,8 @@ export default function HppStockVarianceReportPage() {
           <Link href="/dashboard/owner" className="mb-3 inline-flex items-center gap-1.5 text-sm font-medium text-slate-500 hover:text-blue-600">
             <ArrowLeft className="h-4 w-4" /> Dashboard
           </Link>
-          <h1 className="text-2xl font-bold tracking-tight text-slate-900">HPP & Selisih Stok</h1>
-          <p className="mt-1 text-sm text-slate-500">Ringkasan biaya bahan dan selisih stok.</p>
+          <h1 className="text-2xl font-bold tracking-tight text-slate-900">Biaya Bahan & Selisih Stok</h1>
+          <p className="mt-1 text-sm text-slate-500">Lihat penjualan, biaya bahan, dan hasil cek stok setiap outlet.</p>
         </div>
       </div>
 
@@ -127,7 +127,7 @@ export default function HppStockVarianceReportPage() {
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
           <h2 className="text-sm font-semibold text-slate-800">Filter laporan</h2>
           <button type="button" onClick={() => void downloadReport()} disabled={loading || downloading || !report} className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 transition hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700 disabled:cursor-not-allowed disabled:opacity-50">
-            <Download className="h-4 w-4" /> {downloading ? "Mengunduh…" : "Ekspor Excel"}
+            <Download className="h-4 w-4" /> {downloading ? "Mengunduh…" : "Unduh Excel"}
           </button>
         </div>
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-[1fr_1fr_1.25fr]">
@@ -193,29 +193,34 @@ export default function HppStockVarianceReportPage() {
             <span className="ml-auto inline-flex items-center gap-1 text-xs font-normal">Rincian <ChevronDown className="h-3.5 w-3.5 transition-transform group-open:rotate-180" /></span>
           </summary>
           <div className="mt-3 space-y-1 border-t border-amber-200/70 pt-3 text-xs leading-relaxed">
-            {summary.incompleteCogsOrders > 0 && <p>{summary.incompleteCogsOrders} transaksi belum memiliki HPP lengkap. HPP dan laba kotor masih parsial.</p>}
-            {summary.unvaluedVarianceItems > 0 && <p>{summary.unvaluedVarianceItems} item selisih tanpa harga historis. Nilai selisih masih parsial.</p>}
-            {summary.incompleteOpnames > 0 && <p>{summary.incompleteOpnames} opname belum lengkap.</p>}
-            {report?.locations.some((row) => row.opnameCount === 0) && <p>Ada outlet yang belum melakukan opname.</p>}
-            <p>Persentase ditampilkan setelah komponen hitungan lengkap.</p>
+            {summary.incompleteCogsOrders > 0 && <p>{summary.incompleteCogsOrders} transaksi belum memiliki biaya bahan lengkap. Biaya bahan dan laba kotor belum mencakup semua transaksi.</p>}
+            {summary.unvaluedVarianceItems > 0 && <p>{summary.unvaluedVarianceItems} bahan yang selisih belum memiliki harga saat stok diperiksa. Nilainya belum masuk ke total selisih.</p>}
+            {summary.incompleteOpnames > 0 && <p>{summary.incompleteOpnames} pemeriksaan stok belum lengkap.</p>}
+            {report?.locations.some((row) => row.opnameCount === 0) && <p>Ada outlet yang belum melakukan cek stok.</p>}
+            <p>Persentase akan muncul setelah semua data lengkap.</p>
           </div>
         </details>
       )}
-      {!loading && (summary?.unvaluedAdjustments ?? 0) > 0 && <p className="text-sm text-amber-700">{summary?.unvaluedAdjustments} pengurangan stok belum memiliki biaya. Kerugian tercatat yang tampil masih parsial.</p>}
+      {!loading && (summary?.unvaluedAdjustments ?? 0) > 0 && <p className="text-sm text-amber-700">{summary?.unvaluedAdjustments} catatan pengurangan stok belum memiliki biaya. Total kerugian belum mencakup semua catatan.</p>}
 
       <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
         <div className="border-b border-slate-100 px-5 py-4">
           <div className="flex items-center justify-between gap-4">
-            <h2 className="font-semibold text-slate-800">Per Outlet</h2>
+            <h2 className="font-semibold text-slate-800">Rincian Setiap Outlet</h2>
             <span className="text-xs text-slate-400">{report?.locations.length ?? 0} outlet</span>
           </div>
           <details className="group mt-2 text-xs text-slate-500">
-            <summary className="inline-flex cursor-pointer list-none items-center gap-1.5 font-medium text-blue-600 [&::-webkit-details-marker]:hidden">Cara hitung <ChevronDown className="h-3.5 w-3.5 transition-transform group-open:rotate-180" /></summary>
-            <div className="mt-3 space-y-1.5 rounded-xl bg-slate-50 p-3 leading-relaxed">
-              <p>HPP = kebutuhan bahan resep dan modifier × biaya bahan. Tidak termasuk tenaga kerja dan overhead.</p>
-              <p>Selisih = total nilai absolut stok kurang dan lebih dari opname item terlacak. Waste yang sudah dicatat tampil terpisah.</p>
-              <p>Persentase = selisih ÷ HPP × 100%. Tanda — berarti belum dapat dihitung.</p>
-              <p>Untuk penelitian, samakan bahan dan batas waktu dengan siklus opname.</p>
+            <summary className="inline-flex cursor-pointer list-none items-center gap-1.5 font-medium text-blue-600 [&::-webkit-details-marker]:hidden">Cara membaca laporan <ChevronDown className="h-3.5 w-3.5 transition-transform group-open:rotate-180" /></summary>
+            <div className="mt-3 rounded-xl bg-slate-50 p-4 leading-relaxed">
+              <dl className="grid gap-x-6 gap-y-4 sm:grid-cols-2">
+                <div><dt className="font-semibold text-slate-700">Total penjualan</dt><dd className="mt-1">Jumlah penjualan yang sudah dibayar.</dd></div>
+                <div><dt className="font-semibold text-slate-700">Biaya bahan (HPP)</dt><dd className="mt-1">Biaya bahan untuk menu dan tambahan yang terjual.</dd></div>
+                <div><dt className="font-semibold text-slate-700">Laba kotor</dt><dd className="mt-1">Total penjualan dikurangi biaya bahan. Belum dikurangi gaji, sewa, dan biaya lain.</dd></div>
+                <div><dt className="font-semibold text-slate-700">Selisih stok</dt><dd className="mt-1">Nilai barang yang kurang ditambah nilai barang yang lebih saat cek stok fisik. Keduanya dijumlahkan, bukan saling mengurangi.</dd></div>
+                <div><dt className="font-semibold text-slate-700">Persentase selisih</dt><dd className="mt-1">Selisih stok dibandingkan dengan biaya bahan. Contoh: biaya bahan Rp100.000 dan selisih Rp5.000 berarti selisihnya 5%.</dd></div>
+                <div><dt className="font-semibold text-slate-700">Kerugian tercatat</dt><dd className="mt-1">Nilai pengurangan stok yang sudah dicatat, misalnya barang rusak atau terbuang. Ditampilkan terpisah dari selisih stok.</dd></div>
+              </dl>
+              <p className="mt-4 border-t border-slate-200 pt-3">Tanda — berarti persentase belum bisa dihitung. Cek stok fisik juga disebut opname.</p>
             </div>
           </details>
         </div>
@@ -224,8 +229,8 @@ export default function HppStockVarianceReportPage() {
             <thead className="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
               <tr>
                 <th className="px-5 py-3 font-semibold">Outlet</th>
-                <th className="px-4 py-3 text-right font-semibold">Omzet</th>
-                <th className="px-4 py-3 text-right font-semibold">HPP Bahan</th>
+                <th className="px-4 py-3 text-right font-semibold">Total Penjualan</th>
+                <th className="px-4 py-3 text-right font-semibold">Biaya Bahan</th>
                 <th className="px-4 py-3 text-right font-semibold">Laba Kotor</th>
                 <th className="px-4 py-3 text-right font-semibold">Selisih Stok</th>
                 <th className="px-4 py-3 text-right font-semibold">% Selisih</th>
@@ -241,7 +246,7 @@ export default function HppStockVarianceReportPage() {
                 <tr key={row.locationId} className="hover:bg-slate-50/70">
                   <td className="px-5 py-4">
                     <div className="font-semibold text-slate-800">{row.locationName}</div>
-                    <div className="mt-0.5 text-xs text-slate-400">{row.paidOrders} transaksi · {row.opnameCount} opname</div>
+                    <div className="mt-0.5 text-xs text-slate-400">{row.paidOrders} transaksi · {row.opnameCount} kali cek stok</div>
                     <div className={`mt-2 text-xs font-medium ${row.calculationStatus === "CALCULATED" ? "text-emerald-700" : "text-amber-700"}`}>{HPP_STATUS_LABELS[row.calculationStatus]}</div>
                   </td>
                   <td className="px-4 py-4 text-right text-slate-700">{formatRp(row.revenue)}</td>

@@ -84,19 +84,19 @@ export async function GET(req: NextRequest) {
   if (req.nextUrl.searchParams.get("format") === "xlsx") {
     const rows = [...report.locations.map((row) => ({ ...row, locationName: row.locationName })), { ...report.summary, locationName: "TOTAL" }].map((row) => ({
       "Dari": from, "Sampai": to, "Outlet": row.locationName,
-      "Omzet": row.revenue, "HPP bahan": row.cogs, "Laba kotor": row.grossProfit,
+      "Total penjualan": row.revenue, "Biaya bahan": row.cogs, "Laba kotor": row.grossProfit,
       "Selisih stok": row.stockVariance, "Stok kurang": row.shortageValue, "Stok lebih": row.surplusValue,
       "% selisih": row.variancePercentage == null ? "Tidak dihitung" : Number(row.variancePercentage.toFixed(2)),
-      "Kerugian tercatat": row.knownLosses, "Transaksi lunas": row.paidOrders, "Siklus opname": row.opnameCount,
-      "Transaksi HPP belum lengkap": row.incompleteCogsOrders, "Opname belum lengkap": row.incompleteOpnames,
-      "Item selisih tanpa harga historis": row.unvaluedVarianceItems, "Pengurangan tanpa biaya": row.unvaluedAdjustments,
+      "Kerugian tercatat": row.knownLosses, "Transaksi lunas": row.paidOrders, "Jumlah cek stok": row.opnameCount,
+      "Transaksi tanpa biaya bahan lengkap": row.incompleteCogsOrders, "Cek stok belum lengkap": row.incompleteOpnames,
+      "Bahan selisih tanpa harga saat cek stok": row.unvaluedVarianceItems, "Pengurangan tanpa biaya": row.unvaluedAdjustments,
       "Status perhitungan": HPP_STATUS_LABELS[row.calculationStatus],
     }))
     const buffer = await createStyledExcelReport({
-      title: `HPP bahan dan selisih stok ${from} s.d. ${to}`,
-      sheetName: "HPP dan Selisih", rows,
+      title: `Biaya bahan dan selisih stok ${from} s.d. ${to}`,
+      sheetName: "Biaya dan Selisih", rows,
       headers: Object.keys(rows[0]), widths: [14, 14, 30, 20, 20, 20, 20, 20, 20, 18, 22, 18, 18, 28, 26, 30, 26, 26],
-      currencyHeaders: ["Omzet", "HPP bahan", "Laba kotor", "Selisih stok", "Stok kurang", "Stok lebih", "Kerugian tercatat"],
+      currencyHeaders: ["Total penjualan", "Biaya bahan", "Laba kotor", "Selisih stok", "Stok kurang", "Stok lebih", "Kerugian tercatat"],
     })
     return new Response(new Uint8Array(buffer), { headers: {
       "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",

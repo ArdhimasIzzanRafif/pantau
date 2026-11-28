@@ -222,13 +222,13 @@ export default function OwnerDashboard() {
         <div className="flex items-center gap-3">
           <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-600 text-white"><ChartColumn className="h-5 w-5" /></div>
           <div>
-            <div className="font-semibold text-slate-800">HPP & Selisih Bulan Ini</div>
+            <div className="font-semibold text-slate-800">Biaya Bahan & Selisih Bulan Ini</div>
             <div className="text-xs text-slate-400">Klik untuk rincian per outlet dan periode</div>
           </div>
         </div>
         <div className="flex items-center gap-2 sm:block sm:text-right">
           <Boxes className="h-4 w-4 text-indigo-500 sm:hidden" />
-          <div className="text-xs text-slate-400">HPP</div>
+          <div className="text-xs text-slate-400">Biaya Bahan</div>
           <div className="font-semibold text-slate-800">{hppSummary ? formatRpShort(hppSummary.cogs) : "—"}</div>
         </div>
         <div className="flex items-center gap-2 sm:block sm:text-right">
@@ -237,7 +237,7 @@ export default function OwnerDashboard() {
           <div className="font-semibold text-amber-700">{hppSummary ? formatRpShort(hppSummary.stockVariance) : "—"}</div>
         </div>
         <div className="flex items-center gap-2 sm:block sm:text-right">
-          <div className="text-xs text-slate-400">Selisih / HPP</div>
+          <div className="text-xs text-slate-400">Persentase Selisih</div>
           <div className="font-semibold text-rose-700">{hppSummary?.variancePercentage != null ? `${hppSummary.variancePercentage.toLocaleString("id-ID", { maximumFractionDigits: 2 })}%` : "—"}</div>
         </div>
       </Link>

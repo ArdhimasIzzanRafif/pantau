@@ -56,7 +56,7 @@ const OWNER_NAV: NavGroup[] = [
     { label: "Waste & Penyesuaian", href: "/dashboard/adjustments", icon: ClipboardMinus, feature: "ADJUSTMENTS" },
   ]},
   { label: "Laporan",     items: [
-    { label: "HPP & Selisih Stok", href: "/dashboard/reports/hpp-stock-variance", icon: ChartColumn },
+    { label: "Biaya & Selisih Stok", href: "/dashboard/reports/hpp-stock-variance", icon: ChartColumn },
     { label: "Peringatan",        href: "/dashboard/alerts",     icon: AlertTriangle, feature: "ALERTS" },
     { label: "Riwayat",           href: "/dashboard/audit",      icon: History, feature: "HISTORY" },
   ]},

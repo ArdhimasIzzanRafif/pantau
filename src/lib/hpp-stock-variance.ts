@@ -5,10 +5,10 @@ type Numeric = number | string | { toString(): string }
 export type HppCalculationStatus = "CALCULATED" | "INCOMPLETE" | "NO_OPNAME" | "NO_COGS"
 
 export const HPP_STATUS_LABELS: Record<HppCalculationStatus, string> = {
-  CALCULATED: "Dapat dihitung",
+  CALCULATED: "Hitungan lengkap",
   INCOMPLETE: "Data belum lengkap",
-  NO_OPNAME: "Belum ada opname",
-  NO_COGS: "HPP nol",
+  NO_OPNAME: "Belum cek stok",
+  NO_COGS: "Biaya bahan Rp0",
 }
 
 type ReportInput = {

@@ -91,7 +91,7 @@ test("HPP POS resep + modifier, filter, snapshot, status, dan Excel memakai angk
     assert.equal(sheet.getCell("G2").value, report.summary.stockVariance)
     assert.equal(sheet.getCell("J2").value, Number(report.summary.variancePercentage!.toFixed(2)))
     assert.equal(sheet.getCell("M2").value, 2)
-    assert.equal(sheet.getCell("R2").value, "Dapat dihitung")
+    assert.equal(sheet.getCell("R2").value, "Hitungan lengkap")
     assert.equal((await fetch(reportUrl, { headers: { Cookie: cookies.SUPERVISOR } })).status, 403)
     assert.equal((await fetch(`${base}/api/reports/hpp-stock-variance?${new URLSearchParams({ ...Object.fromEntries(params), locationId: "foreign-location" })}`, { headers })).status, 404)
     const all = await (await fetch(`${base}/api/reports/hpp-stock-variance?from=2026-11-15&to=2026-11-15`, { headers })).json() as HppStockVarianceReport

@@ -617,16 +617,25 @@ main:has(:is(.fixed.inset-0, .app-overlay):not(.pointer-events-none)) {
     margin: 0;
   }
 
-  html,
-  body {
+  html:has(#receipt-content),
+  body:has(#receipt-content) {
     width: 58mm;
     min-width: 58mm;
+    height: auto !important;
+    position: static !important;
+    overflow: visible !important;
     margin: 0 !important;
     background: #fff !important;
   }
 
-  body * {
+  body:has(#receipt-content) * {
     visibility: hidden !important;
+  }
+
+  body:has(#receipt-content) :is(.app-shell, .receipt-modal, .receipt-dialog) {
+    overflow: visible !important;
+    max-height: none !important;
+    transform: none !important;
   }
 
   #receipt-content,

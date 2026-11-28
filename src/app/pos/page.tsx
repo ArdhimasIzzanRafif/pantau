@@ -34,6 +34,7 @@ import QRCode from "qrcode"
 import { makeQrisDynamic } from "@/lib/qris"
 import { isDiscountRuleValidNow } from "@/lib/discount-schedule"
 import { useReceiptPrinter } from "@/hooks/use-receipt-printer"
+import { dispatchReceiptPrint } from "@/lib/receipt-printing"
 import { StableDraftInput } from "@/components/ui/stable-draft-input"
 import { getEffectivePermissions } from "@/lib/permissions"
 import { useOrgPermissions } from "@/lib/use-can-edit"
@@ -359,6 +360,7 @@ export default function POSPage() {
 
   const receiptPrinter = useReceiptPrinter()
   const { printer, busy: printerBusy, stage: printerStage, error: printerError, notice: printerNotice } = receiptPrinter
+  const directPrintingSupported = isBluetoothPrintingSupported()
 
   const [showOpenShift, setShowOpenShift] = useState(false)
   const [openingBalance, setOpeningBalance] = useState("")
@@ -1096,7 +1098,13 @@ export default function POSPage() {
         { text: receiptFooterText || "Terima kasih!", align: "center" },
       ]
 
-    await receiptPrinter.send(printLines, { logoUrl: withLogo ? receiptLogoUrl : null, feedLines: 4 })
+    await dispatchReceiptPrint({
+      supportsDirect: directPrintingSupported,
+      hasPrinter: !!printer,
+      connect: () => receiptPrinter.connect(),
+      printDirect: () => receiptPrinter.send(printLines, { logoUrl: withLogo ? receiptLogoUrl : null, feedLines: 4 }),
+      printSystem: () => window.print(),
+    })
   }
 
   function handleConnectPrinter() {
@@ -3151,9 +3159,9 @@ export default function POSPage() {
           `Terima kasih! 🙏`,
         ]
         return (
-          <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
+          <div className="receipt-modal fixed inset-0 z-50 flex items-center justify-center px-4">
             <div className="absolute inset-0 bg-black/70" />
-            <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-xs z-10 overflow-hidden">
+            <div className="receipt-dialog relative bg-white rounded-2xl shadow-2xl w-full max-w-xs z-10 overflow-hidden">
 
               {/* Thermal paper area */}
               <div
@@ -3269,7 +3277,7 @@ export default function POSPage() {
 
               {/* Actions */}
               <div className="px-4 pb-4 pt-2 space-y-2 border-t border-slate-100">
-                {isBluetoothPrintingSupported() && (
+                {directPrintingSupported ? (
                   <div className="flex items-center justify-between px-1 pb-1">
                     <span className="text-xs text-slate-400 truncate pr-2">
                       {printer ? `Printer: ${thermalPrinterName(printer)}` : "Printer belum terhubung"}
@@ -3294,6 +3302,10 @@ export default function POSPage() {
                       </button>
                     </div>
                   </div>
+                ) : (
+                  <p className="rounded-xl bg-slate-50 px-3 py-2.5 text-xs leading-5 text-slate-500">
+                    Bluetooth langsung tidak tersedia. Pilih printer melalui menu cetak perangkat.
+                  </p>
                 )}
                 {printerBusy && printerStage && (
                   <div className="flex items-center justify-between gap-2 px-1 pb-1">
@@ -3306,16 +3318,21 @@ export default function POSPage() {
                     </button>
                   </div>
                 )}
-                {printerError && <p className="text-xs text-red-500 px-1 pb-1">{printerError}</p>}
-                {printerNotice && !printerBusy && <p className="text-xs text-emerald-600 px-1 pb-1">{printerNotice}</p>}
+                {printerError && <p role="alert" className="text-xs leading-5 text-red-500 px-1 pb-1">{printerError}</p>}
+                {printerNotice && !printerBusy && <p role="status" className="text-xs leading-5 text-slate-500 px-1 pb-1">{printerNotice}</p>}
                 <button
                   onClick={() => handlePrint()}
                   disabled={printerBusy}
                   className="w-full flex items-center justify-center gap-1.5 border border-slate-200 hover:bg-slate-50 disabled:bg-slate-50 disabled:text-slate-400 disabled:cursor-wait text-slate-700 font-medium py-2.5 rounded-xl text-sm transition-colors"
                 >
                   <Printer className={`w-4 h-4 ${printerBusy ? "animate-pulse" : ""}`} />
-                  {printerBusy ? "Mengirim ke printer..." : printer ? "Cetak via Bluetooth" : "Cetak Struk"}
+                  {printerBusy ? "Mengirim ke printer..." : !directPrintingSupported ? "Pilih printer & cetak" : printer ? "Cetak via Bluetooth" : "Hubungkan printer"}
                 </button>
+                {directPrintingSupported && (
+                  <button onClick={() => window.print()} disabled={printerBusy} className="w-full py-2 text-xs font-medium text-slate-500 hover:text-slate-700 disabled:opacity-50">
+                    Cetak lewat perangkat
+                  </button>
+                )}
                 <button
                   onClick={resetOrder}
                   className="w-full bg-slate-900 hover:bg-slate-800 text-white font-semibold py-3 rounded-xl text-sm transition-colors"

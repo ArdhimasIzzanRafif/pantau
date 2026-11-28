@@ -1,6 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useRef, useState } from "react"
+import { printerFeedback } from "@/lib/receipt-printing"
 import {
   connectThermalPrinter, disconnectThermalPrinter, imageUrlToEscPosRaster,
   isThermalPrinterConnected, onThermalPrinterDisconnected, printViaBluetooth,
@@ -76,9 +77,14 @@ export function useReceiptPrinter() {
     if (mounted.current) { setBusy(false); setStage("") }
   }
 
-  function failed(cause: unknown) {
+  function failed(cause: unknown, action: "connect" | "send" = "send") {
     if (!mounted.current) return
-    setError(cause instanceof Error ? cause.message : "Pengiriman ke printer gagal.")
+    const feedback = printerFeedback(cause, action)
+    if (feedback.kind === "notice") setNotice(feedback.message)
+    else {
+      console.error(`Receipt printer ${action} failed:`, cause)
+      setError(feedback.message)
+    }
     if (active.current && !isThermalPrinterConnected(active.current)) setPrinter(null)
   }
 
@@ -102,7 +108,7 @@ export function useReceiptPrinter() {
         }
         adopt(selected)
       }
-    } catch (cause) { failed(cause) } finally { finish() }
+    } catch (cause) { failed(cause, "connect") } finally { finish() }
   }
 
   async function send(lines: ReceiptLine[], options: { logoUrl?: string | null; feedLines?: number } = {}) {

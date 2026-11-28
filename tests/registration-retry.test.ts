@@ -6,7 +6,8 @@ import { readFileSync } from "node:fs"
 import bcrypt from "bcryptjs"
 import { PrismaClient } from "@prisma/client"
 import { PrismaPg } from "@prisma/adapter-pg"
-import { RegistrationError, submitRegistration, reviewRegistration } from "../src/lib/registration"
+import { RegistrationError, RegistrationVerificationRequired, submitRegistration, reviewRegistration } from "../src/lib/registration"
+import { issueRegistrationVerification, registrationVerificationHash, registrationVerificationIdentifier } from "../src/lib/registration-verification"
 import { hasOrganizationAccess } from "../src/lib/organization-subscription"
 
 test("daftar ulang melalui form: tiga pengajuan, batas admin, tanpa akun ganda", { timeout: 90_000 }, async (t) => {
@@ -15,7 +16,7 @@ test("daftar ulang melalui form: tiga pengajuan, batas admin, tanpa akun ganda",
   assert.ok(url.pathname.startsWith("/pantau_registration_test"), "Use a disposable registration test database")
   const db = new PrismaClient({ adapter: new PrismaPg({ connectionString: url.toString() }) })
   const marker = randomUUID()
-  const input = { name: "Pendaftar QA", email: `${marker}@registration.invalid`, phone: "081234567890", password: "TestDaftar123!", businessName: "Warung QA", plan: "kasir" }
+  const input = { name: "Pendaftar QA", email: `${marker}@registration.invalid`, phone: "081234567890", password: "TestDaftar123!", businessName: "Warung QA", plan: "kasir", retryToken: undefined as string | undefined }
   const admin = "admin@registration.invalid"
   const orgIds: string[] = []
   const userIds: string[] = []
@@ -43,7 +44,7 @@ test("daftar ulang melalui form: tiga pengajuan, batas admin, tanpa akun ganda",
       await assert.rejects(reviewRegistration(db, first.organizationId, "reject", admin), fails(409))
     })
     await t.test("password salah tidak mengambil alih akun atau memakan kesempatan", async () => {
-      await assert.rejects(capture({ password: "Different123!" }), fails(401))
+      await assert.rejects(capture({ password: "Different123!" }), (error: unknown) => error instanceof RegistrationVerificationRequired)
       assert.equal((await db.organization.findUniqueOrThrow({ where: { id: first.organizationId } })).registrationAttempts, 1)
     })
     await t.test("daftar ulang kedua memakai ID dan password lama serta menyimpan revisi", async () => {
@@ -127,8 +128,64 @@ test("daftar ulang melalui form: tiga pengajuan, batas admin, tanpa akun ganda",
       assert.equal((await db.organization.findUniqueOrThrow({ where: { id: manual.organizationId } })).status, "SUSPENDED")
       assert.equal((await capture({ email: `legacy-${input.email}` })).registrationAttempts, 2)
     })
+    const changed = await capture({ email: `changed-${input.email}` })
+    await reviewRegistration(db, changed.organizationId, "reject", admin)
+    const changedInput = { email: `changed-${input.email}`, password: "PasswordBaru123!", name: "Pemilik Baru", businessName: "Restoran Baru", phone: "089999999999", plan: "operasional" }
+    const owner = await db.user.findUniqueOrThrow({ where: { id: changed.userId } })
+    let linkToken = ""
+    await t.test("password baru meminta verifikasi email dan tidak mengubah akun sebelum verifikasi", async () => {
+      await assert.rejects(capture(changedInput), (error: unknown) => error instanceof RegistrationVerificationRequired && error.email === changedInput.email)
+      assert.equal((await db.user.findUniqueOrThrow({ where: { id: changed.userId } })).password, owner.password)
+      assert.equal((await db.organization.findUniqueOrThrow({ where: { id: changed.organizationId } })).registrationAttempts, 1)
+      const links = await Promise.all([issueRegistrationVerification(db, owner.id, owner.password), issueRegistrationVerification(db, owner.id, owner.password)])
+      assert.equal(links.filter(Boolean).length, 1)
+      const link = links.find(Boolean)
+      assert.ok(link)
+      linkToken = link.token
+      const row = await db.verificationToken.findFirstOrThrow({ where: { identifier: link.identifier } })
+      assert.notEqual(row.token, linkToken)
+      assert.equal(row.token, registrationVerificationHash(linkToken))
+      assert.equal(await issueRegistrationVerification(db, owner.id, owner.password), null)
+    })
+    await t.test("tautan salah, beda email, dan kedaluwarsa tidak memakan kesempatan daftar", async () => {
+      await assert.rejects(capture({ ...changedInput, retryToken: "f".repeat(64) }), fails(400))
+      await assert.rejects(capture({ ...changedInput, email: `unknown-${input.email}`, retryToken: linkToken }), fails(400))
+      await db.verificationToken.updateMany({ where: { identifier: registrationVerificationIdentifier(owner.id, owner.password) }, data: { expires: new Date(Date.now() - 1) } })
+      await assert.rejects(capture({ ...changedInput, retryToken: linkToken }), fails(400))
+      assert.equal((await db.organization.findUniqueOrThrow({ where: { id: changed.organizationId } })).registrationAttempts, 1)
+      const link = await issueRegistrationVerification(db, owner.id, owner.password)
+      assert.ok(link)
+      linkToken = link.token
+    })
+    await t.test("email terverifikasi mengizinkan semua data dan password baru tanpa menggandakan akun", async () => {
+      const result = await capture({ ...changedInput, retryToken: linkToken })
+      assert.equal(result.userId, changed.userId)
+      assert.equal(result.organizationId, changed.organizationId)
+      assert.equal(result.registrationAttempts, 2)
+      const user = await db.user.findUniqueOrThrow({ where: { id: changed.userId } })
+      const org = await db.organization.findUniqueOrThrow({ where: { id: changed.organizationId } })
+      assert.equal(user.email, changedInput.email)
+      assert.equal(user.name, changedInput.name)
+      assert.ok(await bcrypt.compare(changedInput.password, user.password!))
+      assert.equal(await bcrypt.compare(input.password, user.password!), false)
+      assert.equal(org.name, changedInput.businessName)
+      assert.equal(org.ownerPhone, changedInput.phone)
+      assert.equal(org.plan, "PRO")
+      assert.equal(org.status, "PENDING")
+    })
+    await t.test("tautan terpakai tidak dapat mengganti password lagi pada pengajuan berikutnya", async () => {
+      await reviewRegistration(db, changed.organizationId, "reject", admin)
+      await assert.rejects(capture({ ...changedInput, password: "LagiBerbeda123!", retryToken: linkToken }), fails(400))
+      assert.equal((await db.organization.findUniqueOrThrow({ where: { id: changed.organizationId } })).registrationAttempts, 2)
+      const user = await db.user.findUniqueOrThrow({ where: { id: changed.userId } })
+      const challenge = await issueRegistrationVerification(db, user.id, user.password)
+      assert.ok(challenge)
+      await db.user.update({ where: { id: user.id }, data: { password: await bcrypt.hash("ResetTerpisah123!", 4) } })
+      await assert.rejects(capture({ ...changedInput, password: "LagiBerbeda123!", retryToken: challenge.token }), fails(400))
+    })
     assert.ok(await bcrypt.compare(input.password, originalPassword!))
   } finally {
+    await db.verificationToken.deleteMany({ where: { OR: userIds.map((id) => ({ identifier: { startsWith: `registration-retry:${id}:` } })) } })
     await db.platformAuditLog.deleteMany({ where: { targetId: { in: orgIds } } })
     await db.organization.deleteMany({ where: { id: { in: orgIds } } })
     await db.user.deleteMany({ where: { id: { in: userIds } } })

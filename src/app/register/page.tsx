@@ -1,8 +1,8 @@
 "use client"
 
 import Link from "next/link"
-import { useState } from "react"
-import { useRouter } from "next/navigation"
+import { Suspense, useState } from "react"
+import { useRouter, useSearchParams } from "next/navigation"
 import { signIn } from "next-auth/react"
 import { Eye, EyeOff, Loader2, CheckCircle, Check, X, Store, UtensilsCrossed } from "lucide-react"
 import { checkPassword, passwordStrength, isPasswordValid } from "@/lib/password"
@@ -44,14 +44,21 @@ const outletCounts = [{ options: [
 ] }]
 
 export default function RegisterPage() {
+  return <Suspense fallback={<div className="flex min-h-screen items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-blue-600" /></div>}><RegistrationForm /></Suspense>
+}
+
+function RegistrationForm() {
   const router = useRouter()
+  const searchParams = useSearchParams()
+  const retryToken = searchParams.get("retryToken") ?? ""
   const [step, setStep] = useState(0)
   const [showPassword, setShowPassword] = useState(false)
   const [loading, setLoading] = useState(false)
+  const [verificationMessage, setVerificationMessage] = useState<string | null>(null)
   const [warning, setWarning] = useState<{ title?: string; messages: string[] } | null>(null)
   const [form, setForm] = useState({
     name: "",
-    email: "",
+    email: retryToken ? searchParams.get("email") ?? "" : "",
     phone: "",
     password: "",
     businessName: "",
@@ -111,16 +118,22 @@ export default function RegisterPage() {
             ? form.businessTypeCustom.trim()
             : form.businessType,
           plan: form.plan,
+          ...(retryToken ? { retryToken } : {}),
         }),
       })
 
       const data = await res.json()
+      if (data.requiresEmailVerification) {
+        setVerificationMessage(data.message)
+        setLoading(false)
+        return
+      }
       if (!res.ok) { setWarning({ title: "Pendaftaran belum berhasil", messages: [data.error ?? "Terjadi kesalahan"] }); setLoading(false); return }
 
       // Auto-login setelah register berhasil
       const login = await signIn("credentials", {
         redirect: false,
-        email: form.email.trim().toLowerCase(),
+        email: data.email ?? form.email.trim().toLowerCase(),
         password: form.password,
       })
 
@@ -182,7 +195,8 @@ export default function RegisterPage() {
             <div className="mb-7">
               <h1 className="text-3xl font-light text-slate-900 mb-2 tracking-tight">Buat akun Anda</h1>
               <p className="text-slate-500 text-sm">Daftar dan langsung pakai setelah akun disetujui</p>
-              <p className="mt-3 text-xs leading-relaxed text-slate-500">Pernah ditolak? Daftar ulang di sini dengan email dan password sebelumnya. Maksimal 3 pengajuan; setelah penolakan ketiga, hubungi admin.</p>
+              <p className="mt-3 text-xs leading-relaxed text-slate-500">Pernah ditolak? Daftar ulang dengan email yang sama. Nama, toko, WhatsApp, dan password boleh diperbarui. Password baru memerlukan verifikasi email. Maksimal 3 pengajuan.</p>
+              {retryToken && <p role="status" className="mt-3 rounded-xl bg-blue-50 p-3 text-sm leading-relaxed text-blue-700">Lanjutkan daftar ulang dengan email yang terisi di bawah. Lengkapi data Anda dan masukkan password baru, lalu kirim pengajuan.</p>}
             </div>
             <form onSubmit={handleNext} noValidate className="space-y-4">
               <div>
@@ -203,6 +217,7 @@ export default function RegisterPage() {
                   required
                   placeholder="budi@toko.com"
                   value={form.email}
+                  readOnly={!!retryToken}
                   onChange={(e) => setForm({ ...form, email: e.target.value })}
                   className="w-full px-4 py-3 rounded-xl border border-slate-200 bg-slate-50/50 text-slate-900 placeholder-slate-400 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition"
                 />
@@ -282,6 +297,7 @@ export default function RegisterPage() {
               <h1 className="text-3xl font-light text-slate-900 mb-2 tracking-tight">Info bisnis Anda</h1>
               <p className="text-slate-500 text-sm">Kami sesuaikan sistem untuk kebutuhan Anda</p>
             </div>
+            {verificationMessage && <div role="status" className="mb-5 rounded-2xl border border-blue-100 bg-blue-50 p-4 text-sm leading-relaxed text-blue-800"><p className="mb-1 font-semibold">Periksa email Anda</p><p>{verificationMessage}</p></div>}
             <form onSubmit={handleSubmit} noValidate className="space-y-4">
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1.5">Nama Bisnis</label>
@@ -367,7 +383,7 @@ export default function RegisterPage() {
                   disabled={loading}
                   className="flex-1 bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white font-semibold py-3 rounded-full transition-colors flex items-center justify-center gap-2"
                 >
-                  {loading ? <><Loader2 className="w-4 h-4 animate-spin" /> Memproses...</> : "Buat Akun"}
+                  {loading ? <><Loader2 className="w-4 h-4 animate-spin" /> Memproses...</> : verificationMessage ? "Kirim ulang tautan" : retryToken ? "Kirim pengajuan ulang" : "Buat Akun"}
                 </button>
               </div>
             </form>

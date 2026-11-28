@@ -1,5 +1,6 @@
 import bcrypt from "bcryptjs"
 import { Prisma, type PrismaClient } from "@prisma/client"
+import { registrationVerificationHash, registrationVerificationIdentifier } from "./registration-verification"
 
 export const MAX_REGISTRATION_ATTEMPTS = 3
 
@@ -7,22 +8,27 @@ export class RegistrationError extends Error {
   constructor(message: string, public status = 409) { super(message) }
 }
 
+export class RegistrationVerificationRequired extends RegistrationError {
+  constructor(public userId: string, public email: string, public passwordHash: string | null) {
+    super("Verifikasi email diperlukan untuk menggunakan password baru.", 202)
+  }
+}
+
 export type RegistrationInput = {
   name: string; email: string; phone?: string; password: string
-  businessName: string; plan?: string
+  businessName: string; plan?: string; retryToken?: string
 }
 
 export function rejectedRegistrationStatus(attempts: number) {
   return attempts >= MAX_REGISTRATION_ATTEMPTS ? "SUSPENDED" as const : "REJECTED" as const
 }
 
-/** Reuse only the original owner's rejected signup; never replace its password. */
+/** Reuse the rejected signup. New passwords require proof of email ownership. */
 export async function submitRegistration(db: PrismaClient, input: RegistrationInput) {
   const email = input.email.trim().toLowerCase()
   const existing = await db.user.findFirst({ where: { email: { equals: email, mode: "insensitive" } } })
-  if (existing && (!existing.password || !await bcrypt.compare(input.password, existing.password))) {
-    throw new RegistrationError("Email sudah terdaftar. Untuk mengajukan ulang, gunakan password akun sebelumnya atau pilih Lupa password.", 401)
-  }
+  if (input.retryToken && !existing) throw new RegistrationError("Email tidak sesuai dengan tautan verifikasi.", 400)
+  const passwordMatches = !!existing?.password && await bcrypt.compare(input.password, existing.password)
   const hashed = existing ? null : await bcrypt.hash(input.password, 12)
   const plan = input.plan === "operasional" ? "PRO" as const : "STARTER" as const
 
@@ -51,6 +57,19 @@ export async function submitRegistration(db: PrismaClient, input: RegistrationIn
       if (org.registrationAttempts >= MAX_REGISTRATION_ATTEMPTS) {
         throw new RegistrationError("Batas 3 kali pengajuan sudah tercapai. Hubungi admin untuk diaktifkan kembali.", 403)
       }
+      let newPassword: string | undefined
+      if (!passwordMatches) {
+        if (!input.retryToken) throw new RegistrationVerificationRequired(owner.id, owner.email, owner.password)
+        if (!/^[a-f0-9]{64}$/.test(input.retryToken)) {
+          throw new RegistrationError("Tautan verifikasi tidak valid. Minta tautan baru melalui formulir Daftar.", 400)
+        }
+        const consumed = await tx.verificationToken.deleteMany({ where: {
+          identifier: registrationVerificationIdentifier(owner.id, owner.password),
+          token: registrationVerificationHash(input.retryToken), expires: { gt: new Date() },
+        } })
+        if (consumed.count !== 1) throw new RegistrationError("Tautan verifikasi kedaluwarsa atau sudah digunakan. Minta tautan baru melalui formulir Daftar.", 400)
+        newPassword = await bcrypt.hash(input.password, 12)
+      }
       // Conditional write prevents parallel submissions consuming two attempts.
       const updated = await tx.organization.updateMany({
         where: { id: org.id, status: "REJECTED", registrationAttempts: org.registrationAttempts },
@@ -58,8 +77,8 @@ export async function submitRegistration(db: PrismaClient, input: RegistrationIn
           status: "PENDING", registrationAttempts: { increment: 1 }, suspendedAt: null },
       })
       if (updated.count !== 1) throw new RegistrationError("Status pengajuan sudah berubah. Muat ulang dan coba lagi.")
-      await tx.user.update({ where: { id: owner.id }, data: { name: input.name.trim() } })
-      return { userId: owner.id, organizationId: org.id, registrationAttempts: org.registrationAttempts + 1, resubmitted: true }
+      await tx.user.update({ where: { id: owner.id }, data: { name: input.name.trim(), ...(newPassword ? { password: newPassword } : {}) } })
+      return { userId: owner.id, organizationId: org.id, email: owner.email, registrationAttempts: org.registrationAttempts + 1, resubmitted: true }
     }
 
     const user = await tx.user.create({ data: { name: input.name.trim(), email, password: hashed } })
@@ -70,7 +89,7 @@ export async function submitRegistration(db: PrismaClient, input: RegistrationIn
       status: "PENDING", plan, registrationAttempts: 1,
       users: { create: { userId: user.id, role: "OWNER" } },
     } })
-    return { userId: user.id, organizationId: org.id, registrationAttempts: 1, resubmitted: false }
+    return { userId: user.id, organizationId: org.id, email: user.email, registrationAttempts: 1, resubmitted: false }
   })
 }
 

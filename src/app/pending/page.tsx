@@ -33,7 +33,7 @@ export default function PendingPage() {
           <h1 className="text-xl font-bold text-slate-900 mb-2">{rejected ? "Pengajuan Ditolak" : "Pendaftaran Diterima"}</h1>
           <p className="text-slate-500 text-sm leading-relaxed mb-8">
             {rejected
-              ? "Anda masih bisa mendaftar ulang melalui formulir Daftar dengan email dan password akun yang sama. Setelah 3 kali pengajuan ditolak, hanya admin yang dapat mengaktifkan akun."
+              ? "Anda masih bisa mendaftar ulang melalui formulir Daftar dengan email yang sama. Data bisnis dan password boleh diperbarui; password baru memerlukan verifikasi email. Setelah 3 kali pengajuan ditolak, hanya admin yang dapat mengaktifkan akun."
               : "Akun Anda sedang ditinjau tim kami. Anda akan menerima email saat akun disetujui."}
           </p>
 

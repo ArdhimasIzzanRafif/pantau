@@ -497,6 +497,7 @@ export default function GoodsReceiptPage() {
     )
 
     const issues: string[] = []
+    if (!locationId) issues.push("Pilih lokasi penerimaan barang")
     if (!photoUrl) issues.push("Foto surat jalan atau barang wajib diunggah")
     if ((purchaseOrder || pesananBanyak) && alasanTanpaKonfirmasi !== null && alasanTanpaKonfirmasi.trim().length < 5) {
       issues.push("Isi alasan barang datang tanpa konfirmasi supplier (minimal 5 huruf)")
@@ -600,7 +601,7 @@ export default function GoodsReceiptPage() {
         })
         if (!res.ok) {
           const d = await res.json()
-          setError(`Gagal buat item "${r.customName}": ${d.error ?? "error"}`)
+          setWarning({ title: "Penerimaan belum tersimpan", messages: [`Gagal buat item "${r.customName}": ${d.error ?? "Coba lagi"}`] })
           setSubmitting(false)
           return
         }
@@ -683,12 +684,11 @@ export default function GoodsReceiptPage() {
       setClientRequestId("")
       await Promise.all([fetchReceipts(), fetchData()])
     } else {
-      const text = await res.text()
-      try { setError(JSON.parse(text).error ?? "Gagal menyimpan penerimaan") }
-      catch { setError(`Server error (${res.status}): ${text.slice(0, 120)}`) }
+      const data = await res.json().catch(() => null)
+      setWarning({ title: "Penerimaan belum tersimpan", messages: [data?.error ?? "Gagal menyimpan penerimaan. Silakan coba lagi."] })
     }
-    } catch (e) {
-      setError(`Error: ${e instanceof Error ? e.message : String(e)}`)
+    } catch {
+      setWarning({ title: "Penerimaan belum dapat dikonfirmasi", messages: ["Koneksi terputus. Periksa riwayat penerimaan sebelum mencoba lagi."] })
     } finally {
       setSubmitting(false)
     }

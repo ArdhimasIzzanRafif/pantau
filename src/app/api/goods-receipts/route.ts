@@ -8,6 +8,7 @@ import { getHistoryScope } from "@/lib/history-scope"
 import { memberJoinedAt } from "@/lib/membership"
 import { recordGoodsReceipt, PenerimaanDitolak } from "@/lib/goods-receipt-intake"
 import { createStyledExcelReport } from "@/lib/excel-report"
+import { isStockTransactionTimeout } from "@/lib/stock-transaction"
 
 export async function GET(req: NextRequest) {
   const user = await requireAuth()
@@ -111,6 +112,7 @@ export async function POST(req: NextRequest) {
   } catch (error) {
     if (error instanceof PenerimaanDitolak) return err(error.message)
     console.error("Create goods receipt failed:", error)
+    if (isStockTransactionTimeout(error)) return err("Penerimaan belum tersimpan karena proses terlalu lama. Silakan coba lagi.", 503)
     return err("Gagal menyimpan penerimaan barang", 500)
   }
 }

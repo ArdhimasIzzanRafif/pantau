@@ -7,6 +7,7 @@ import { convertToBase, UnitError } from "@/lib/unit-conversion"
 import { continueOutstandingNeeds } from "@/lib/transfer-flow"
 import { sudahDikonfirmasi } from "@/lib/purchase-orders"
 import { InventoryCostError, resolveReceiptPurchaseCost } from "@/lib/inventory-cost"
+import { STOCK_TRANSACTION_OPTIONS } from "@/lib/stock-transaction"
 
 /// Penolakan yang punya pesan untuk pengguna, bukan kesalahan server.
 export class PenerimaanDitolak extends Error {}
@@ -470,7 +471,7 @@ export async function recordGoodsReceipt(
         where: { id: gr.id },
         include: { location: true, items: { include: { item: true, batch: true } } },
       })
-    })
+    }, STOCK_TRANSACTION_OPTIONS)
     return { receipt, created: true }
   } catch (error) {
     if (error instanceof StockError) throw new PenerimaanDitolak(error.message)

@@ -6,6 +6,7 @@ import { canAccessLocation } from "@/lib/location-access"
 import { asOrderError, deductOrderStock } from "@/lib/pos-orders"
 import { getPosCooldown, lockStockFlowLocation, OpnameQuietPeriodError } from "@/lib/opname-lock"
 import { guestBillKey } from "@/lib/guest-bill"
+import { STOCK_TRANSACTION_OPTIONS, isStockTransactionTimeout } from "@/lib/stock-transaction"
 
 // Multiple orders may be paid together only within the same customer session.
 export async function POST(req: NextRequest) {
@@ -109,7 +110,7 @@ export async function POST(req: NextRequest) {
           data: { totalSales: { increment: combinedTotal }, totalOrders: { increment: orders.length } },
         })
       }
-    })
+    }, STOCK_TRANSACTION_OPTIONS)
   } catch (error) {
     if (error instanceof OpnameQuietPeriodError && error.kind === "POS_COOLDOWN") {
       return ok({
@@ -123,7 +124,9 @@ export async function POST(req: NextRequest) {
     if (error instanceof Error && error.message === "PAYMENT_INSUFFICIENT") return err("Jumlah pembayaran kurang", 422)
     if (error instanceof Error && error.message === "ALREADY_PAID") return err("Ada order yang sudah diproses kasir lain", 409)
     if (error instanceof Error && error.message === "LOCATION_UNAVAILABLE") return err("Outlet sudah tidak tersedia", 409)
-    throw error
+    console.error("Pay POS batch failed:", error)
+    if (isStockTransactionTimeout(error)) return err("Pembayaran belum tersimpan karena proses terlalu lama. Silakan coba lagi.", 503)
+    return err("Pembayaran belum dapat disimpan. Silakan coba lagi.", 500)
   }
 
   return ok({

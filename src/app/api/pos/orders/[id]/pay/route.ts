@@ -5,6 +5,7 @@ import { requireAuth, isResponse, ok, err } from "@/lib/api-helpers"
 import { canAccessLocation } from "@/lib/location-access"
 import { asOrderError, deductOrderStock } from "@/lib/pos-orders"
 import { getPosCooldown, lockStockFlowLocation, OpnameQuietPeriodError } from "@/lib/opname-lock"
+import { STOCK_TRANSACTION_OPTIONS, isStockTransactionTimeout } from "@/lib/stock-transaction"
 
 // POST /api/pos/orders/:id/pay — process payment on a held order
 export async function POST(
@@ -126,7 +127,7 @@ export async function POST(
           shift: { select: { id: true, shiftNumber: true } },
         },
       })
-    })
+    }, STOCK_TRANSACTION_OPTIONS)
 
     return ok(order)
   } catch (error) {
@@ -142,7 +143,9 @@ export async function POST(
     if (error instanceof Error && error.message === "PAYMENT_INSUFFICIENT") return err("Jumlah pembayaran kurang", 422)
     if (error instanceof Error && error.message === "ALREADY_PAID") return err("Order sudah diproses oleh kasir lain", 409)
     if (error instanceof Error && error.message === "LOCATION_UNAVAILABLE") return err("Outlet sudah tidak tersedia", 409)
-    throw error
+    console.error("Pay POS order failed:", error)
+    if (isStockTransactionTimeout(error)) return err("Pembayaran belum tersimpan karena proses terlalu lama. Silakan coba lagi.", 503)
+    return err("Pembayaran belum dapat disimpan. Silakan coba lagi.", 500)
   }
 }
 

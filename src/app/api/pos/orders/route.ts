@@ -4,6 +4,7 @@ import { prisma } from "@/lib/db"
 import { requireAuth, isResponse, ok, err } from "@/lib/api-helpers"
 import { canAccessLocation } from "@/lib/location-access"
 import { getPosCooldown, lockStockFlowLocation, OpnameQuietPeriodError } from "@/lib/opname-lock"
+import { STOCK_TRANSACTION_OPTIONS, isStockTransactionTimeout } from "@/lib/stock-transaction"
 import {
   asOrderError,
   deductOrderStock,
@@ -249,7 +250,7 @@ export async function POST(req: NextRequest) {
           shift: { select: { id: true, shiftNumber: true } },
         },
       })
-    })
+    }, STOCK_TRANSACTION_OPTIONS)
 
     return ok(order, 201)
   } catch (error) {
@@ -264,6 +265,8 @@ export async function POST(req: NextRequest) {
     if (error instanceof Error && error.message === "SHIFT_INVALID") return err("Shift tidak aktif atau bukan milik outlet", 409)
     if (error instanceof Error && error.message === "PAYMENT_INSUFFICIENT") return err("Jumlah pembayaran kurang", 422)
     if (error instanceof Error && error.message === "LOCATION_UNAVAILABLE") return err("Outlet sudah tidak tersedia", 409)
-    throw error
+    console.error("Create POS order failed:", error)
+    if (isStockTransactionTimeout(error)) return err("Transaksi belum tersimpan karena proses terlalu lama. Silakan coba lagi.", 503)
+    return err("Transaksi belum dapat disimpan. Silakan coba lagi.", 500)
   }
 }
